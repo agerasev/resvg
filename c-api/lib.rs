@@ -7,6 +7,7 @@
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::slice;
+use std::mem::drop;
 
 use usvg::NodeExt;
 
@@ -135,7 +136,16 @@ pub extern "C" fn resvg_options_create() -> *mut resvg_options {
 }
 
 #[inline]
-fn cast_opt(opt: *mut resvg_options) -> Option<&'static mut usvg::Options> {
+fn cast_opt(opt: *const resvg_options) -> Option<&'static usvg::Options> {
+    if opt.is_null() {
+        None
+    } else {
+        Some(unsafe { &(*opt).0 })
+    }
+}
+
+#[inline]
+fn cast_opt_mut(opt: *mut resvg_options) -> Option<&'static mut usvg::Options> {
     if opt.is_null() {
         None
     } else {
@@ -145,7 +155,7 @@ fn cast_opt(opt: *mut resvg_options) -> Option<&'static mut usvg::Options> {
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_resources_dir(opt: *mut resvg_options, path: *const c_char) -> i32 {
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
     if path.is_null() {
         opt.resources_dir = None;
     } else {
@@ -156,14 +166,14 @@ pub extern "C" fn resvg_options_set_resources_dir(opt: *mut resvg_options, path:
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_dpi(opt: *mut resvg_options, dpi: f64) -> i32 {
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
     opt.dpi = dpi;
     ErrorId::Ok as i32    
 }
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_font_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
     let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
     opt.font_family = family.to_string();
     ErrorId::Ok as i32
@@ -171,7 +181,7 @@ pub extern "C" fn resvg_options_set_font_family(opt: *mut resvg_options, family:
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_font_size(opt: *mut resvg_options, font_size: f64) -> i32 {
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
     opt.font_size = font_size;
     ErrorId::Ok as i32
 }
@@ -180,7 +190,7 @@ pub extern "C" fn resvg_options_set_font_size(opt: *mut resvg_options, font_size
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_set_serif_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
         let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
         opt.fontdb.set_serif_family(family.to_string());
         ErrorId::Ok as i32
@@ -195,7 +205,7 @@ pub extern "C" fn resvg_options_set_serif_family(opt: *mut resvg_options, family
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
         let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
         opt.fontdb.set_sans_serif_family(family.to_string());
         ErrorId::Ok as i32
@@ -210,7 +220,7 @@ pub extern "C" fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, f
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_set_cursive_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
         let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
         opt.fontdb.set_cursive_family(family.to_string());
         ErrorId::Ok as i32
@@ -225,7 +235,7 @@ pub extern "C" fn resvg_options_set_cursive_family(opt: *mut resvg_options, fami
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_set_fantasy_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
         let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
         opt.fontdb.set_fantasy_family(family.to_string());
         ErrorId::Ok as i32
@@ -240,7 +250,7 @@ pub extern "C" fn resvg_options_set_fantasy_family(opt: *mut resvg_options, fami
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_set_monospace_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
         let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
         opt.fontdb.set_monospace_family(family.to_string());
         ErrorId::Ok as i32
@@ -253,7 +263,7 @@ pub extern "C" fn resvg_options_set_monospace_family(opt: *mut resvg_options, fa
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_languages(opt: *mut resvg_options, languages: *const c_char) -> i32 {
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
 
     if languages.is_null() {
         opt.languages = Vec::new();
@@ -273,7 +283,7 @@ pub extern "C" fn resvg_options_set_languages(opt: *mut resvg_options, languages
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options, mode: i32) -> i32 {
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
     opt.shape_rendering = match mode {
         0 => usvg::ShapeRendering::OptimizeSpeed,
         1 => usvg::ShapeRendering::CrispEdges,
@@ -285,7 +295,7 @@ pub extern "C" fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options, mode: i32) -> i32 {
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
     opt.text_rendering = match mode {
         0 => usvg::TextRendering::OptimizeSpeed,
         1 => usvg::TextRendering::OptimizeLegibility,
@@ -297,7 +307,7 @@ pub extern "C" fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options,
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options, mode: i32) -> i32 {
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
     opt.image_rendering = match mode {
         0 => usvg::ImageRendering::OptimizeQuality,
         1 => usvg::ImageRendering::OptimizeSpeed,
@@ -308,7 +318,7 @@ pub extern "C" fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_keep_named_groups(opt: *mut resvg_options, keep: bool) -> i32 {
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
     opt.keep_named_groups = keep;
     ErrorId::Ok as i32
 }
@@ -317,7 +327,7 @@ pub extern "C" fn resvg_options_set_keep_named_groups(opt: *mut resvg_options, k
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_load_system_fonts(opt: *mut resvg_options) -> i32 {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
         opt.fontdb.load_system_fonts();
         ErrorId::Ok as i32
     }
@@ -335,11 +345,11 @@ pub extern "C" fn resvg_options_load_font_file(
 ) -> i32 {
     #[cfg(feature = "text")] {
         let file_path = unwrap_or_return!(cstr_to_str(file_path), ErrorId::NotAnUtf8Str as i32);
-        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull as i32);
         match opt.fontdb.load_font_file(file_path) {
             Ok(()) => ErrorId::Ok as i32,
             Err(e) => {
-                log::warn!("Failed to load font file: {}", e);
+                log::warn!("Failed to load font file '{}': {}", file_path, e);
                 ErrorId::FileOpenFailed as i32
             }
         }
@@ -362,7 +372,7 @@ pub extern "C" fn resvg_options_load_font_data(
             return ErrorId::PointerIsNull as i32;
         }
         let data = unsafe { slice::from_raw_parts(data as *const u8, len) };
-        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::NotAnUtf8Str as i32);
+        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::NotAnUtf8Str as i32);
         opt.fontdb.load_font_data(data.to_vec());
         ErrorId::Ok as i32
     }
@@ -373,11 +383,12 @@ pub extern "C" fn resvg_options_load_font_data(
 }
 
 #[no_mangle]
-pub extern "C" fn resvg_options_destroy(opt: *mut resvg_options) {
-    unsafe {
-        assert!(!opt.is_null());
-        Box::from_raw(opt)
-    };
+pub extern "C" fn resvg_options_destroy(opt: *mut resvg_options) -> i32 {
+    if opt.is_null() {
+        return ErrorId::PointerIsNull as i32;
+    }
+    drop(unsafe { Box::from_raw(opt) });
+    ErrorId::Ok as i32
 }
 
 
@@ -390,24 +401,24 @@ pub extern "C" fn resvg_parse_tree_from_file(
     opt: *const resvg_options,
     raw_tree: *mut *mut resvg_render_tree,
 ) -> i32 {
-    let file_path = match cstr_to_str(file_path) {
-        Some(v) => v,
-        None => return ErrorId::NotAnUtf8Str as i32,
-    };
+    let file_path = unwrap_or_return!(cstr_to_str(file_path), ErrorId::NotAnUtf8Str as i32);
 
-    let raw_opt = unsafe {
-        assert!(!opt.is_null());
-        &*opt
-    };
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
 
     let file_data = match std::fs::read(file_path) {
         Ok(tree) => tree,
-        Err(_) => return ErrorId::FileOpenFailed as i32,
+        Err(e) => {
+            log::warn!("Failed read file '{}': {}", file_path, e);
+            return ErrorId::FileOpenFailed as i32;
+        }
     };
 
-    let tree = match usvg::Tree::from_data(&file_data, &raw_opt.0.to_ref()) {
+    let tree = match usvg::Tree::from_data(&file_data, &opt.to_ref()) {
         Ok(tree) => tree,
-        Err(e) => return convert_error(e) as i32,
+        Err(e) => {
+            log::warn!("Failed to parse SVG data: {}", e);
+            return convert_error(e) as i32;
+        },
     };
 
     let tree_box = Box::new(resvg_render_tree(tree));
@@ -423,16 +434,19 @@ pub extern "C" fn resvg_parse_tree_from_data(
     opt: *const resvg_options,
     raw_tree: *mut *mut resvg_render_tree,
 ) -> i32 {
+    if data.is_null() {
+        return ErrorId::PointerIsNull as i32;
+    }
     let data = unsafe { slice::from_raw_parts(data as *const u8, len) };
 
-    let raw_opt = unsafe {
-        assert!(!opt.is_null());
-        &*opt
-    };
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
 
-    let tree = match usvg::Tree::from_data(data, &raw_opt.0.to_ref()) {
+    let tree = match usvg::Tree::from_data(data, &opt.to_ref()) {
         Ok(tree) => tree,
-        Err(e) => return convert_error(e) as i32,
+        Err(e) => {
+            log::warn!("Failed to parse SVG data: {}", e);
+            return convert_error(e) as i32;
+        }
     };
 
     let tree_box = Box::new(resvg_render_tree(tree));

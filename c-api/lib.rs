@@ -19,6 +19,11 @@ enum ErrorId {
     ElementsLimitReached,
     InvalidSize,
     ParsingFailed,
+    PointerIsNull,
+    InvalidFitValue,
+    RenderError,
+    EmptyNodeId,
+    NodeNotFound,
 }
 
 #[repr(C)]
@@ -75,21 +80,27 @@ pub struct resvg_fit_to {
 
 impl resvg_fit_to {
     #[inline]
-    fn to_usvg(&self) -> usvg::FitTo {
+    fn to_usvg(&self) -> Option<usvg::FitTo> {
         match self.kind {
             resvg_fit_to_type::RESVG_FIT_TO_ORIGINAL => {
-                usvg::FitTo::Original
+                Some(usvg::FitTo::Original)
             }
             resvg_fit_to_type::RESVG_FIT_TO_WIDTH => {
-                assert!(self.value >= 1.0);
-                usvg::FitTo::Width(self.value as u32)
+                if self.value >= 1.0 {
+                    Some(usvg::FitTo::Width(self.value as u32))
+                } else {
+                    None
+                }
             }
             resvg_fit_to_type::RESVG_FIT_TO_HEIGHT => {
-                assert!(self.value >= 1.0);
-                usvg::FitTo::Height(self.value as u32)
+                if self.value >= 1.0 {
+                    Some(usvg::FitTo::Height(self.value as u32))
+                } else {
+                    None
+                }
             }
             resvg_fit_to_type::RESVG_FIT_TO_ZOOM => {
-                usvg::FitTo::Zoom(self.value)
+                Some(usvg::FitTo::Zoom(self.value))
             }
         }
     }
@@ -582,17 +593,24 @@ pub extern "C" fn resvg_render(
     width: u32,
     height: u32,
     pixmap: *const c_char,
-) {
-    let tree = unsafe {
-        assert!(!tree.is_null());
-        &*tree
-    };
+) -> i32 {
+    if tree.is_null() {
+        return ErrorId::PointerIsNull as i32;
+    }
+    let tree = unsafe { &*tree };
 
     let pixmap_len = width as usize * height as usize * tiny_skia::BYTES_PER_PIXEL;
     let pixmap: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(pixmap as *mut u8, pixmap_len) };
     let pixmap = tiny_skia::PixmapMut::from_bytes(pixmap, width, height).unwrap();
 
-    resvg::render(&tree.0, fit_to.to_usvg(), pixmap).unwrap()
+    let fit_to = match fit_to.to_usvg() {
+        Some(fit_to) => fit_to,
+        None => return ErrorId::InvalidFitValue as i32,
+    };
+    match resvg::render(&tree.0, fit_to, pixmap) {
+        Some(()) => ErrorId::Ok as i32,
+        None => ErrorId::RenderError as i32,
+    }
 }
 
 #[no_mangle]
@@ -603,20 +621,20 @@ pub extern "C" fn resvg_render_node(
     width: u32,
     height: u32,
     pixmap: *const c_char,
-) -> bool {
-    let tree = unsafe {
-        assert!(!tree.is_null());
-        &*tree
-    };
+) -> i32 {
+    if tree.is_null() {
+        return ErrorId::PointerIsNull as i32;
+    }
+    let tree = unsafe { &*tree };
 
     let id = match cstr_to_str(id) {
         Some(v) => v,
-        None => return false,
+        None => return ErrorId::NotAnUtf8Str as i32,
     };
 
     if id.is_empty() {
         log::warn!("Node with an empty ID cannot be rendered.");
-        return false;
+        return ErrorId::EmptyNodeId as i32;
     }
 
     if let Some(node) = tree.0.node_by_id(id) {
@@ -624,10 +642,17 @@ pub extern "C" fn resvg_render_node(
         let pixmap: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(pixmap as *mut u8, pixmap_len) };
         let pixmap = tiny_skia::PixmapMut::from_bytes(pixmap, width, height).unwrap();
 
-        resvg::render_node(&tree.0, &node, fit_to.to_usvg(), pixmap).is_some()
+        let fit_to = match fit_to.to_usvg() {
+            Some(fit_to) => fit_to,
+            None => return ErrorId::InvalidFitValue as i32,
+        };
+        match resvg::render_node(&tree.0, &node, fit_to, pixmap) {
+            Some(()) => ErrorId::Ok as i32,
+            None => ErrorId::RenderError as i32,
+        }
     } else {
         log::warn!("A node with '{}' ID wasn't found.", id);
-        false
+        ErrorId::NodeNotFound as i32
     }
 }
 

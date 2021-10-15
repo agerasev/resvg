@@ -10,6 +10,14 @@ use std::slice;
 
 use usvg::NodeExt;
 
+macro_rules! unwrap_or_return {
+    ($e:expr, $r:expr) => {
+        match $e {
+            Some(value) => value,
+            None => return $r,
+        }
+    }
+}
 
 enum ErrorId {
     Ok = 0,
@@ -21,9 +29,12 @@ enum ErrorId {
     ParsingFailed,
     PointerIsNull,
     InvalidFitValue,
+    InvalidEnumValue,
     RenderError,
     EmptyNodeId,
     NodeNotFound,
+    NotImplemented,
+    PanicCaught,
 }
 
 #[repr(C)]
@@ -124,141 +135,195 @@ pub extern "C" fn resvg_options_create() -> *mut resvg_options {
 }
 
 #[inline]
-fn cast_opt(opt: *mut resvg_options) -> &'static mut usvg::Options {
-    unsafe {
-        assert!(!opt.is_null());
-        &mut (*opt).0
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn resvg_options_set_resources_dir(opt: *mut resvg_options, path: *const c_char) {
-    if path.is_null() {
-        cast_opt(opt).resources_dir = None;
+fn cast_opt(opt: *mut resvg_options) -> Option<&'static mut usvg::Options> {
+    if opt.is_null() {
+        None
     } else {
-        cast_opt(opt).resources_dir = Some(cstr_to_str(path).unwrap().into());
+        Some(unsafe { &mut (*opt).0 })
     }
 }
 
 #[no_mangle]
-pub extern "C" fn resvg_options_set_dpi(opt: *mut resvg_options, dpi: f64) {
-    cast_opt(opt).dpi = dpi;
+pub extern "C" fn resvg_options_set_resources_dir(opt: *mut resvg_options, path: *const c_char) -> i32 {
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    if path.is_null() {
+        opt.resources_dir = None;
+    } else {
+        opt.resources_dir = Some(unwrap_or_return!(cstr_to_str(path), ErrorId::NotAnUtf8Str as i32).into());
+    }
+    ErrorId::Ok as i32
 }
 
 #[no_mangle]
-pub extern "C" fn resvg_options_set_font_family(opt: *mut resvg_options, family: *const c_char) {
-    cast_opt(opt).font_family = cstr_to_str(family).unwrap().to_string();
+pub extern "C" fn resvg_options_set_dpi(opt: *mut resvg_options, dpi: f64) -> i32 {
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    opt.dpi = dpi;
+    ErrorId::Ok as i32    
 }
 
 #[no_mangle]
-pub extern "C" fn resvg_options_set_font_size(opt: *mut resvg_options, font_size: f64) {
-    cast_opt(opt).font_size = font_size;
+pub extern "C" fn resvg_options_set_font_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
+    opt.font_family = family.to_string();
+    ErrorId::Ok as i32
+}
+
+#[no_mangle]
+pub extern "C" fn resvg_options_set_font_size(opt: *mut resvg_options, font_size: f64) -> i32 {
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    opt.font_size = font_size;
+    ErrorId::Ok as i32
 }
 
 #[no_mangle]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_set_serif_family(opt: *mut resvg_options, family: *const c_char) {
+pub extern "C" fn resvg_options_set_serif_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
     #[cfg(feature = "text")] {
-        cast_opt(opt).fontdb.set_serif_family(cstr_to_str(family).unwrap().to_string());
+        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
+        opt.fontdb.set_serif_family(family.to_string());
+        ErrorId::Ok as i32
+    }
+
+    #[cfg(not(feature = "text"))] {
+        ErrorId::NotImplemented as i32
     }
 }
 
 #[no_mangle]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, family: *const c_char) {
+pub extern "C" fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
     #[cfg(feature = "text")] {
-        cast_opt(opt).fontdb.set_sans_serif_family(cstr_to_str(family).unwrap().to_string());
+        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
+        opt.fontdb.set_sans_serif_family(family.to_string());
+        ErrorId::Ok as i32
+    }
+
+    #[cfg(not(feature = "text"))] {
+        ErrorId::NotImplemented as i32
     }
 }
 
 #[no_mangle]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_set_cursive_family(opt: *mut resvg_options, family: *const c_char) {
+pub extern "C" fn resvg_options_set_cursive_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
     #[cfg(feature = "text")] {
-        cast_opt(opt).fontdb.set_cursive_family(cstr_to_str(family).unwrap().to_string());
+        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
+        opt.fontdb.set_cursive_family(family.to_string());
+        ErrorId::Ok as i32
+    }
+
+    #[cfg(not(feature = "text"))] {
+        ErrorId::NotImplemented as i32
     }
 }
 
 #[no_mangle]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_set_fantasy_family(opt: *mut resvg_options, family: *const c_char) {
+pub extern "C" fn resvg_options_set_fantasy_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
     #[cfg(feature = "text")] {
-        cast_opt(opt).fontdb.set_fantasy_family(cstr_to_str(family).unwrap().to_string());
+        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
+        opt.fontdb.set_fantasy_family(family.to_string());
+        ErrorId::Ok as i32
+    }
+
+    #[cfg(not(feature = "text"))] {
+        ErrorId::NotImplemented as i32
     }
 }
 
 #[no_mangle]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_set_monospace_family(opt: *mut resvg_options, family: *const c_char) {
+pub extern "C" fn resvg_options_set_monospace_family(opt: *mut resvg_options, family: *const c_char) -> i32 {
     #[cfg(feature = "text")] {
-        cast_opt(opt).fontdb.set_monospace_family(cstr_to_str(family).unwrap().to_string());
+        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        let family = unwrap_or_return!(cstr_to_str(family), ErrorId::NotAnUtf8Str as i32);
+        opt.fontdb.set_monospace_family(family.to_string());
+        ErrorId::Ok as i32
+    }
+
+    #[cfg(not(feature = "text"))] {
+        ErrorId::NotImplemented as i32
     }
 }
 
 #[no_mangle]
-pub extern "C" fn resvg_options_set_languages(opt: *mut resvg_options, languages: *const c_char) {
+pub extern "C" fn resvg_options_set_languages(opt: *mut resvg_options, languages: *const c_char) -> i32 {
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+
     if languages.is_null() {
-        cast_opt(opt).languages = Vec::new();
-        return;
+        opt.languages = Vec::new();
+        return ErrorId::Ok as i32;
     }
 
-    let languages_str = match cstr_to_str(languages) {
-        Some(v) => v,
-        None => return,
-    };
+    let languages_str = unwrap_or_return!(cstr_to_str(languages), ErrorId::NotAnUtf8Str as i32);
 
     let mut languages = Vec::new();
     for lang in languages_str.split(',') {
         languages.push(lang.trim().to_string());
     }
 
-    cast_opt(opt).languages = languages;
+    opt.languages = languages;
+    ErrorId::Ok as i32
 }
 
 #[no_mangle]
-pub extern "C" fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options, mode: i32) {
-    cast_opt(opt).shape_rendering = match mode {
+pub extern "C" fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options, mode: i32) -> i32 {
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    opt.shape_rendering = match mode {
         0 => usvg::ShapeRendering::OptimizeSpeed,
         1 => usvg::ShapeRendering::CrispEdges,
         2 => usvg::ShapeRendering::GeometricPrecision,
-        _ => return,
-    }
+        _ => return ErrorId::InvalidEnumValue as i32,
+    };
+    ErrorId::Ok as i32
 }
 
 #[no_mangle]
-pub extern "C" fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options, mode: i32) {
-    cast_opt(opt).text_rendering = match mode {
+pub extern "C" fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options, mode: i32) -> i32 {
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    opt.text_rendering = match mode {
         0 => usvg::TextRendering::OptimizeSpeed,
         1 => usvg::TextRendering::OptimizeLegibility,
         2 => usvg::TextRendering::GeometricPrecision,
-        _ => return,
-    }
+        _ => return ErrorId::InvalidEnumValue as i32,
+    };
+    ErrorId::Ok as i32
 }
 
 #[no_mangle]
-pub extern "C" fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options, mode: i32) {
-    cast_opt(opt).image_rendering = match mode {
+pub extern "C" fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options, mode: i32) -> i32 {
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    opt.image_rendering = match mode {
         0 => usvg::ImageRendering::OptimizeQuality,
         1 => usvg::ImageRendering::OptimizeSpeed,
-        _ => return,
-    }
+        _ => return ErrorId::InvalidEnumValue as i32,
+    };
+    ErrorId::Ok as i32
 }
 
 #[no_mangle]
-pub extern "C" fn resvg_options_set_keep_named_groups(opt: *mut resvg_options, keep: bool) {
-    cast_opt(opt).keep_named_groups = keep;
+pub extern "C" fn resvg_options_set_keep_named_groups(opt: *mut resvg_options, keep: bool) -> i32 {
+    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+    opt.keep_named_groups = keep;
+    ErrorId::Ok as i32
 }
 
 #[no_mangle]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_load_system_fonts(opt: *mut resvg_options) {
+pub extern "C" fn resvg_options_load_system_fonts(opt: *mut resvg_options) -> i32 {
     #[cfg(feature = "text")] {
-        let opt = unsafe {
-            assert!(!opt.is_null());
-            &mut *opt
-        };
+        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        opt.fontdb.load_system_fonts();
+        ErrorId::Ok as i32
+    }
 
-        opt.0.fontdb.load_system_fonts();
+    #[cfg(not(feature = "text"))] {
+        ErrorId::NotImplemented as i32
     }
 }
 
@@ -269,25 +334,19 @@ pub extern "C" fn resvg_options_load_font_file(
     file_path: *const c_char,
 ) -> i32 {
     #[cfg(feature = "text")] {
-        let file_path = match cstr_to_str(file_path) {
-            Some(v) => v,
-            None => return ErrorId::NotAnUtf8Str as i32,
-        };
-
-        let opt = unsafe {
-            assert!(!opt.is_null());
-            &mut *opt
-        };
-
-        if opt.0.fontdb.load_font_file(file_path).is_ok() {
-            ErrorId::Ok as i32
-        } else {
-            ErrorId::FileOpenFailed as i32
+        let file_path = unwrap_or_return!(cstr_to_str(file_path), ErrorId::NotAnUtf8Str as i32);
+        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull as i32);
+        match opt.fontdb.load_font_file(file_path) {
+            Ok(()) => ErrorId::Ok as i32,
+            Err(e) => {
+                log::warn!("Failed to load font file: {}", e);
+                ErrorId::FileOpenFailed as i32
+            }
         }
     }
 
     #[cfg(not(feature = "text"))] {
-        ErrorId::Ok as i32
+        ErrorId::NotImplemented as i32
     }
 }
 
@@ -297,16 +356,19 @@ pub extern "C" fn resvg_options_load_font_data(
     opt: *mut resvg_options,
     data: *const c_char,
     len: usize,
-) {
+) -> i32 {
     #[cfg(feature = "text")] {
+        if data.is_null() {
+            return ErrorId::PointerIsNull as i32;
+        }
         let data = unsafe { slice::from_raw_parts(data as *const u8, len) };
+        let opt = unwrap_or_return!(cast_opt(opt), ErrorId::NotAnUtf8Str as i32);
+        opt.fontdb.load_font_data(data.to_vec());
+        ErrorId::Ok as i32
+    }
 
-        let opt = unsafe {
-            assert!(!opt.is_null());
-            &mut *opt
-        };
-
-        opt.0.fontdb.load_font_data(data.to_vec())
+    #[cfg(not(feature = "text"))] {
+        ErrorId::NotImplemented as i32
     }
 }
 

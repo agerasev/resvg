@@ -32,6 +32,7 @@ enum ErrorId {
     InvalidFitValue,
     InvalidEnumValue,
     RenderError,
+    BBoxError,
     EmptyNodeId,
     NodeNotFound,
     NotImplemented,
@@ -456,33 +457,37 @@ pub extern "C" fn resvg_parse_tree_from_data(
 }
 
 #[no_mangle]
-pub extern "C" fn resvg_tree_destroy(tree: *mut resvg_render_tree) {
-    unsafe {
-        assert!(!tree.is_null());
-        Box::from_raw(tree)
-    };
+pub extern "C" fn resvg_tree_destroy(tree: *mut resvg_render_tree) -> i32 {
+    if tree.is_null() {
+        return ErrorId::PointerIsNull as i32;
+    }
+    drop(unsafe { Box::from_raw(tree) });
+    ErrorId::Ok as i32
 }
 
 #[no_mangle]
 pub extern "C" fn resvg_is_image_empty(tree: *const resvg_render_tree) -> bool {
-    let tree = unsafe {
-        assert!(!tree.is_null());
-        &*tree
-    };
+    if tree.is_null() {
+        return false;
+    }
+    let tree = unsafe { &(*tree).0 };
 
     // The root/svg node should have at least two children.
     // The first child is `defs` and it always present.
-    tree.0.root().children().count() > 1
+    tree.root().children().count() > 1
 }
 
 #[no_mangle]
 pub extern "C" fn resvg_get_image_size(tree: *const resvg_render_tree) -> resvg_size {
-    let tree = unsafe {
-        assert!(!tree.is_null());
-        &*tree
-    };
+    if tree.is_null() {
+        return resvg_size {
+            width: 0.0,
+            height: 0.0,
+        };
+    }
+    let tree = unsafe { &(*tree).0 };
 
-    let size = tree.0.svg_node().size;
+    let size = tree.svg_node().size;
 
     resvg_size {
         width: size.width(),
@@ -492,12 +497,17 @@ pub extern "C" fn resvg_get_image_size(tree: *const resvg_render_tree) -> resvg_
 
 #[no_mangle]
 pub extern "C" fn resvg_get_image_viewbox(tree: *const resvg_render_tree) -> resvg_rect {
-    let tree = unsafe {
-        assert!(!tree.is_null());
-        &*tree
-    };
+    if tree.is_null() {
+        return resvg_rect {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+        };
+    }
+    let tree = unsafe { &(*tree).0 };
 
-    let r = tree.0.svg_node().view_box.rect;
+    let r = tree.svg_node().view_box.rect;
 
     resvg_rect {
         x: r.x(),
@@ -512,13 +522,13 @@ pub extern "C" fn resvg_get_image_viewbox(tree: *const resvg_render_tree) -> res
 pub extern "C" fn resvg_get_image_bbox(
     tree: *const resvg_render_tree,
     bbox: *mut resvg_rect,
-) -> bool {
-    let tree = unsafe {
-        assert!(!tree.is_null());
-        &*tree
-    };
+) -> i32 {
+    if tree.is_null() {
+        return ErrorId::PointerIsNull as i32;
+    }
+    let tree = unsafe { &(*tree).0 };
 
-    if let Some(r) = tree.0.root().calculate_bbox().and_then(|r| r.to_rect()) {
+    if let Some(r) = tree.root().calculate_bbox().and_then(|r| r.to_rect()) {
         unsafe {
             *bbox = resvg_rect {
                 x: r.x(),
@@ -528,9 +538,9 @@ pub extern "C" fn resvg_get_image_bbox(
             }
         }
 
-        true
+        ErrorId::Ok as i32
     } else {
-        false
+        ErrorId::BBoxError as i32
     }
 }
 
@@ -539,26 +549,26 @@ pub extern "C" fn resvg_get_node_bbox(
     tree: *const resvg_render_tree,
     id: *const c_char,
     bbox: *mut resvg_path_bbox,
-) -> bool {
+) -> i32 {
     let id = match cstr_to_str(id) {
         Some(v) => v,
         None => {
             log::warn!("Provided ID is no an UTF-8 string.");
-            return false;
+            return ErrorId::NotAnUtf8Str as i32;
         }
     };
 
     if id.is_empty() {
         log::warn!("Node ID must not be empty.");
-        return false;
+        return ErrorId::EmptyNodeId as i32;
     }
 
-    let tree = unsafe {
-        assert!(!tree.is_null());
-        &*tree
-    };
+    if tree.is_null() {
+        return ErrorId::PointerIsNull as i32;
+    }
+    let tree = unsafe { &(*tree).0 };
 
-    match tree.0.node_by_id(id) {
+    match tree.node_by_id(id) {
         Some(node) => {
             if let Some(r) = node.calculate_bbox() {
                 unsafe {
@@ -570,14 +580,14 @@ pub extern "C" fn resvg_get_node_bbox(
                     }
                 }
 
-                true
+                ErrorId::Ok as i32
             } else {
-                false
+                ErrorId::BBoxError as i32
             }
         }
         None => {
             log::warn!("No node with '{}' ID is in the tree.", id);
-            false
+            ErrorId::NodeNotFound as i32
         }
     }
 }
@@ -595,12 +605,14 @@ pub extern "C" fn resvg_node_exists(
         }
     };
 
+    if tree.is_null() {
+        return false;
+    }
     let tree = unsafe {
-        assert!(!tree.is_null());
-        &*tree
+        &(*tree).0
     };
 
-    tree.0.node_by_id(id).is_some()
+    tree.node_by_id(id).is_some()
 }
 
 #[no_mangle]
@@ -608,21 +620,21 @@ pub extern "C" fn resvg_get_node_transform(
     tree: *const resvg_render_tree,
     id: *const c_char,
     ts: *mut resvg_transform,
-) -> bool {
+) -> i32 {
     let id = match cstr_to_str(id) {
         Some(v) => v,
         None => {
             log::warn!("Provided ID is no an UTF-8 string.");
-            return false;
+            return ErrorId::NotAnUtf8Str as i32;
         }
     };
 
-    let tree = unsafe {
-        assert!(!tree.is_null());
-        &*tree
-    };
+    if tree.is_null() {
+        return ErrorId::PointerIsNull as i32;
+    }
+    let tree = unsafe { &(*tree).0 };
 
-    if let Some(node) = tree.0.node_by_id(id) {
+    if let Some(node) = tree.node_by_id(id) {
         let abs_ts = node.abs_transform();
 
         unsafe {
@@ -636,10 +648,10 @@ pub extern "C" fn resvg_get_node_transform(
             }
         }
 
-        return true;
+        ErrorId::Ok as i32
+    } else {
+        ErrorId::NodeNotFound as i32
     }
-
-    false
 }
 
 pub fn cstr_to_str(text: *const c_char) -> Option<&'static str> {

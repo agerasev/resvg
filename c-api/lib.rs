@@ -22,6 +22,7 @@ pub enum ErrorId {
     InvalidSize,
     ParsingFailed,
     PointerIsNull,
+    ZeroPixmapSize,
     InvalidFitValue,
     InvalidEnumValue,
     RenderError,
@@ -32,22 +33,49 @@ pub enum ErrorId {
     PanicCaught,
 }
 
-macro_rules! unwrap_or_return {
-    ($e:expr, $r:expr) => {
+macro_rules! unwrap_option_or_return {
+    ($e:expr, $r:expr $(,)?) => {
         match $e {
-            Some(value) => value,
+            Some(v) => v,
             None => return $r,
         }
-    }
+    };
 }
 
-macro_rules! unwrap_or_return_into {
-    ($e:expr) => {
+macro_rules! unwrap_result_or_return {
+    ($e:expr, $r:expr $(,)?) => {
         match $e {
-            Ok(value) => value,
-            Err(e) => return Into::<ErrorId>::into(e),
+            Ok(v) => v,
+            Err(e) => return $r(e),
         }
-    }
+    };
+    ($e:expr) => {
+        unwrap_result_or_return!($e, Into::<ErrorId>::into)
+    };
+}
+
+macro_rules! cast_ptr_or_return {
+    ($e:expr, $r:expr $(,)?) => {
+        match unsafe { $e.as_ref() } {
+            Some(v) => &v.0,
+            None => return $r,
+        }
+    };
+    ($e:expr) => {
+        cast_ptr_or_return!($e, ErrorId::PointerIsNull)
+    };
+}
+
+macro_rules! cast_mut_ptr_or_return {
+    ($e:expr, $r:expr $(,)?) => {
+        match unsafe { $e.as_mut() } {
+            Some(v) => &mut v.0,
+            None => return $r,
+        }
+    };
+    ($e:expr) => {
+        cast_mut_ptr_or_return!($e, ErrorId::PointerIsNull)
+    };
 }
 
 #[repr(C)]
@@ -147,53 +175,35 @@ pub extern "C" fn resvg_options_create() -> *mut resvg_options {
     Box::into_raw(Box::new(resvg_options(usvg::Options::default())))
 }
 
-#[inline]
-fn cast_opt(opt: *const resvg_options) -> Option<&'static usvg::Options> {
-    if opt.is_null() {
-        None
-    } else {
-        Some(unsafe { &(*opt).0 })
-    }
-}
-
-#[inline]
-fn cast_opt_mut(opt: *mut resvg_options) -> Option<&'static mut usvg::Options> {
-    if opt.is_null() {
-        None
-    } else {
-        Some(unsafe { &mut (*opt).0 })
-    }
-}
-
 #[no_mangle]
 pub extern "C" fn resvg_options_set_resources_dir(opt: *mut resvg_options, path: *const c_char) -> ErrorId {
-    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
+    let opt = cast_mut_ptr_or_return!(opt);
     if path.is_null() {
         opt.resources_dir = None;
     } else {
-        opt.resources_dir = Some(unwrap_or_return_into!(cstr_to_str(path)).into());
+        opt.resources_dir = Some(unwrap_result_or_return!(cstr_to_str(path)).into());
     }
     ErrorId::Ok
 }
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_dpi(opt: *mut resvg_options, dpi: f64) -> ErrorId {
-    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
+    let opt = cast_mut_ptr_or_return!(opt);
     opt.dpi = dpi;
     ErrorId::Ok    
 }
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_font_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
-    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
-    let family = unwrap_or_return_into!(cstr_to_str(family));
+    let opt = cast_mut_ptr_or_return!(opt);
+    let family = unwrap_result_or_return!(cstr_to_str(family));
     opt.font_family = family.to_string();
     ErrorId::Ok
 }
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_font_size(opt: *mut resvg_options, font_size: f64) -> ErrorId {
-    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
+    let opt = cast_mut_ptr_or_return!(opt);
     opt.font_size = font_size;
     ErrorId::Ok
 }
@@ -202,8 +212,8 @@ pub extern "C" fn resvg_options_set_font_size(opt: *mut resvg_options, font_size
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_set_serif_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
-        let family = unwrap_or_return_into!(cstr_to_str(family));
+        let opt = cast_mut_ptr_or_return!(opt);
+        let family = unwrap_result_or_return!(cstr_to_str(family));
         opt.fontdb.set_serif_family(family.to_string());
         ErrorId::Ok
     }
@@ -217,8 +227,8 @@ pub extern "C" fn resvg_options_set_serif_family(opt: *mut resvg_options, family
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
-        let family = unwrap_or_return_into!(cstr_to_str(family));
+        let opt = cast_mut_ptr_or_return!(opt);
+        let family = unwrap_result_or_return!(cstr_to_str(family));
         opt.fontdb.set_sans_serif_family(family.to_string());
         ErrorId::Ok
     }
@@ -232,8 +242,8 @@ pub extern "C" fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, f
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_set_cursive_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
-        let family = unwrap_or_return_into!(cstr_to_str(family));
+        let opt = cast_mut_ptr_or_return!(opt);
+        let family = unwrap_result_or_return!(cstr_to_str(family));
         opt.fontdb.set_cursive_family(family.to_string());
         ErrorId::Ok
     }
@@ -247,8 +257,8 @@ pub extern "C" fn resvg_options_set_cursive_family(opt: *mut resvg_options, fami
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_set_fantasy_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
-        let family = unwrap_or_return_into!(cstr_to_str(family));
+        let opt = cast_mut_ptr_or_return!(opt);
+        let family = unwrap_result_or_return!(cstr_to_str(family));
         opt.fontdb.set_fantasy_family(family.to_string());
         ErrorId::Ok
     }
@@ -262,8 +272,8 @@ pub extern "C" fn resvg_options_set_fantasy_family(opt: *mut resvg_options, fami
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_set_monospace_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
-        let family = unwrap_or_return_into!(cstr_to_str(family));
+        let opt = cast_mut_ptr_or_return!(opt);
+        let family = unwrap_result_or_return!(cstr_to_str(family));
         opt.fontdb.set_monospace_family(family.to_string());
         ErrorId::Ok
     }
@@ -275,14 +285,14 @@ pub extern "C" fn resvg_options_set_monospace_family(opt: *mut resvg_options, fa
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_languages(opt: *mut resvg_options, languages: *const c_char) -> ErrorId {
-    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
+    let opt = cast_mut_ptr_or_return!(opt);
 
     if languages.is_null() {
         opt.languages = Vec::new();
         return ErrorId::Ok;
     }
 
-    let languages_str = unwrap_or_return_into!(cstr_to_str(languages));
+    let languages_str = unwrap_result_or_return!(cstr_to_str(languages));
 
     let mut languages = Vec::new();
     for lang in languages_str.split(',') {
@@ -295,7 +305,7 @@ pub extern "C" fn resvg_options_set_languages(opt: *mut resvg_options, languages
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options, mode: i32) -> ErrorId {
-    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
+    let opt = cast_mut_ptr_or_return!(opt);
     opt.shape_rendering = match mode {
         0 => usvg::ShapeRendering::OptimizeSpeed,
         1 => usvg::ShapeRendering::CrispEdges,
@@ -307,7 +317,7 @@ pub extern "C" fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options, mode: i32) -> ErrorId {
-    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
+    let opt = cast_mut_ptr_or_return!(opt);
     opt.text_rendering = match mode {
         0 => usvg::TextRendering::OptimizeSpeed,
         1 => usvg::TextRendering::OptimizeLegibility,
@@ -319,7 +329,7 @@ pub extern "C" fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options,
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options, mode: i32) -> ErrorId {
-    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
+    let opt = cast_mut_ptr_or_return!(opt);
     opt.image_rendering = match mode {
         0 => usvg::ImageRendering::OptimizeQuality,
         1 => usvg::ImageRendering::OptimizeSpeed,
@@ -330,7 +340,7 @@ pub extern "C" fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options
 
 #[no_mangle]
 pub extern "C" fn resvg_options_set_keep_named_groups(opt: *mut resvg_options, keep: bool) -> ErrorId {
-    let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
+    let opt = cast_mut_ptr_or_return!(opt);
     opt.keep_named_groups = keep;
     ErrorId::Ok
 }
@@ -339,7 +349,7 @@ pub extern "C" fn resvg_options_set_keep_named_groups(opt: *mut resvg_options, k
 #[allow(unused_variables)]
 pub extern "C" fn resvg_options_load_system_fonts(opt: *mut resvg_options) -> ErrorId {
     #[cfg(feature = "text")] {
-        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
+        let opt = cast_mut_ptr_or_return!(opt);
         opt.fontdb.load_system_fonts();
         ErrorId::Ok
     }
@@ -356,8 +366,8 @@ pub extern "C" fn resvg_options_load_font_file(
     file_path: *const c_char,
 ) -> ErrorId {
     #[cfg(feature = "text")] {
-        let file_path = unwrap_or_return_into!(cstr_to_str(file_path));
-        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::PointerIsNull);
+        let file_path = unwrap_result_or_return!(cstr_to_str(file_path));
+        let opt = cast_mut_ptr_or_return!(opt);
         match opt.fontdb.load_font_file(file_path) {
             Ok(()) => ErrorId::Ok,
             Err(e) => {
@@ -384,7 +394,7 @@ pub extern "C" fn resvg_options_load_font_data(
             return ErrorId::PointerIsNull;
         }
         let data = unsafe { slice::from_raw_parts(data as *const u8, len) };
-        let opt = unwrap_or_return!(cast_opt_mut(opt), ErrorId::NotAnUtf8Str);
+        let opt = cast_mut_ptr_or_return!(opt);
         opt.fontdb.load_font_data(data.to_vec());
         ErrorId::Ok
     }
@@ -413,9 +423,9 @@ pub extern "C" fn resvg_parse_tree_from_file(
     opt: *const resvg_options,
     raw_tree: *mut *mut resvg_render_tree,
 ) -> ErrorId {
-    let file_path = unwrap_or_return_into!(cstr_to_str(file_path));
+    let file_path = unwrap_result_or_return!(cstr_to_str(file_path));
 
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull);
+    let opt = cast_ptr_or_return!(opt);
 
     let file_data = match std::fs::read(file_path) {
         Ok(tree) => tree,
@@ -451,7 +461,7 @@ pub extern "C" fn resvg_parse_tree_from_data(
     }
     let data = unsafe { slice::from_raw_parts(data as *const u8, len) };
 
-    let opt = unwrap_or_return!(cast_opt(opt), ErrorId::PointerIsNull);
+    let opt = cast_ptr_or_return!(opt);
 
     let tree = match usvg::Tree::from_data(data, &opt.to_ref()) {
         Ok(tree) => tree,
@@ -478,10 +488,7 @@ pub extern "C" fn resvg_tree_destroy(tree: *mut resvg_render_tree) -> ErrorId {
 
 #[no_mangle]
 pub extern "C" fn resvg_is_image_empty(tree: *const resvg_render_tree) -> bool {
-    if tree.is_null() {
-        return false;
-    }
-    let tree = unsafe { &(*tree).0 };
+    let tree = cast_ptr_or_return!(tree, false);
 
     // The root/svg node should have at least two children.
     // The first child is `defs` and it always present.
@@ -490,13 +497,13 @@ pub extern "C" fn resvg_is_image_empty(tree: *const resvg_render_tree) -> bool {
 
 #[no_mangle]
 pub extern "C" fn resvg_get_image_size(tree: *const resvg_render_tree) -> resvg_size {
-    if tree.is_null() {
-        return resvg_size {
+    let tree = cast_ptr_or_return!(
+        tree,
+        resvg_size {
             width: 0.0,
             height: 0.0,
-        };
-    }
-    let tree = unsafe { &(*tree).0 };
+        },
+    );
 
     let size = tree.svg_node().size;
 
@@ -508,15 +515,15 @@ pub extern "C" fn resvg_get_image_size(tree: *const resvg_render_tree) -> resvg_
 
 #[no_mangle]
 pub extern "C" fn resvg_get_image_viewbox(tree: *const resvg_render_tree) -> resvg_rect {
-    if tree.is_null() {
-        return resvg_rect {
+    let tree = cast_ptr_or_return!(
+        tree,
+        resvg_rect {
             x: 0.0,
             y: 0.0,
             width: 0.0,
             height: 0.0,
-        };
-    }
-    let tree = unsafe { &(*tree).0 };
+        },
+    );
 
     let r = tree.svg_node().view_box.rect;
 
@@ -534,10 +541,10 @@ pub extern "C" fn resvg_get_image_bbox(
     tree: *const resvg_render_tree,
     bbox: *mut resvg_rect,
 ) -> ErrorId {
-    if tree.is_null() {
+    let tree = cast_ptr_or_return!(tree);
+    if bbox.is_null() {
         return ErrorId::PointerIsNull;
     }
-    let tree = unsafe { &(*tree).0 };
 
     if let Some(r) = tree.root().calculate_bbox().and_then(|r| r.to_rect()) {
         unsafe {
@@ -561,24 +568,12 @@ pub extern "C" fn resvg_get_node_bbox(
     id: *const c_char,
     bbox: *mut resvg_path_bbox,
 ) -> ErrorId {
-    let id = match cstr_to_str(id) {
-        Ok(v) => v,
-        Err(CStrToStrError::PointerIsNull) => return ErrorId::PointerIsNull,
-        Err(CStrToStrError::NotAnUtf8Str(e)) => {
-            log::warn!("Provided ID is no an UTF-8 string: {}", e);
-            return ErrorId::NotAnUtf8Str;
-        }
-    };
-
+    let id = unwrap_result_or_return!(cstr_to_str(id));
     if id.is_empty() {
-        log::warn!("Node ID must not be empty.");
         return ErrorId::EmptyNodeId;
     }
 
-    if tree.is_null() {
-        return ErrorId::PointerIsNull;
-    }
-    let tree = unsafe { &(*tree).0 };
+    let tree = cast_ptr_or_return!(tree);
 
     match tree.node_by_id(id) {
         Some(node) => {
@@ -597,10 +592,7 @@ pub extern "C" fn resvg_get_node_bbox(
                 ErrorId::BBoxError
             }
         }
-        None => {
-            log::warn!("No node with '{}' ID is in the tree.", id);
-            ErrorId::NodeNotFound
-        }
+        None => ErrorId::NodeNotFound,
     }
 }
 
@@ -609,21 +601,12 @@ pub extern "C" fn resvg_node_exists(
     tree: *const resvg_render_tree,
     id: *const c_char,
 ) -> bool {
-    let id = match cstr_to_str(id) {
-        Ok(v) => v,
-        Err(CStrToStrError::PointerIsNull) => return false,
-        Err(CStrToStrError::NotAnUtf8Str(e)) => {
-            log::warn!("Provided ID is no an UTF-8 string: {}", e);
-            return false;
-        }
-    };
-
-    if tree.is_null() {
+    let id = unwrap_result_or_return!(cstr_to_str(id), |_| false);
+    if id.is_empty() {
         return false;
     }
-    let tree = unsafe {
-        &(*tree).0
-    };
+
+    let tree = cast_ptr_or_return!(tree, false);
 
     tree.node_by_id(id).is_some()
 }
@@ -634,19 +617,16 @@ pub extern "C" fn resvg_get_node_transform(
     id: *const c_char,
     ts: *mut resvg_transform,
 ) -> ErrorId {
-    let id = match cstr_to_str(id) {
-        Ok(v) => v,
-        Err(CStrToStrError::PointerIsNull) => return ErrorId::PointerIsNull,
-        Err(CStrToStrError::NotAnUtf8Str(e)) => {
-            log::warn!("Provided ID is no an UTF-8 string: {}", e);
-            return ErrorId::NotAnUtf8Str;
-        }
-    };
+    let id = unwrap_result_or_return!(cstr_to_str(id));
+    if id.is_empty() {
+        return ErrorId::EmptyNodeId;
+    }
 
-    if tree.is_null() {
+    let tree = cast_ptr_or_return!(tree);
+
+    if ts.is_null() {
         return ErrorId::PointerIsNull;
     }
-    let tree = unsafe { &(*tree).0 };
 
     if let Some(node) = tree.node_by_id(id) {
         let abs_ts = node.abs_transform();
@@ -712,20 +692,21 @@ pub extern "C" fn resvg_render(
     height: u32,
     pixmap: *const c_char,
 ) -> ErrorId {
-    if tree.is_null() {
+    let tree = cast_ptr_or_return!(tree);
+
+    if pixmap.is_null() {
         return ErrorId::PointerIsNull;
     }
-    let tree = unsafe { &*tree };
-
+    if width == 0 || height == 0 {
+        return ErrorId::ZeroPixmapSize;
+    }
     let pixmap_len = width as usize * height as usize * tiny_skia::BYTES_PER_PIXEL;
     let pixmap: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(pixmap as *mut u8, pixmap_len) };
     let pixmap = tiny_skia::PixmapMut::from_bytes(pixmap, width, height).unwrap();
 
-    let fit_to = match fit_to.to_usvg() {
-        Some(fit_to) => fit_to,
-        None => return ErrorId::InvalidFitValue,
-    };
-    match resvg::render(&tree.0, fit_to, pixmap) {
+    let fit_to = unwrap_option_or_return!(fit_to.to_usvg(), ErrorId::InvalidFitValue);
+
+    match resvg::render(tree, fit_to, pixmap) {
         Some(()) => ErrorId::Ok,
         None => ErrorId::RenderError,
     }
@@ -740,33 +721,31 @@ pub extern "C" fn resvg_render_node(
     height: u32,
     pixmap: *const c_char,
 ) -> ErrorId {
-    if tree.is_null() {
-        return ErrorId::PointerIsNull;
-    }
-    let tree = unsafe { &*tree };
+    let tree = cast_ptr_or_return!(tree);
 
-    let id = unwrap_or_return_into!(cstr_to_str(id));
-
+    let id = unwrap_result_or_return!(cstr_to_str(id));
     if id.is_empty() {
-        log::warn!("Node with an empty ID cannot be rendered.");
         return ErrorId::EmptyNodeId;
     }
 
-    if let Some(node) = tree.0.node_by_id(id) {
+    if let Some(node) = tree.node_by_id(id) {
+        if pixmap.is_null() {
+            return ErrorId::PointerIsNull;
+        }
+        if width == 0 || height == 0 {
+            return ErrorId::ZeroPixmapSize;
+        }
         let pixmap_len = width as usize * height as usize * tiny_skia::BYTES_PER_PIXEL;
         let pixmap: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(pixmap as *mut u8, pixmap_len) };
         let pixmap = tiny_skia::PixmapMut::from_bytes(pixmap, width, height).unwrap();
 
-        let fit_to = match fit_to.to_usvg() {
-            Some(fit_to) => fit_to,
-            None => return ErrorId::InvalidFitValue,
-        };
-        match resvg::render_node(&tree.0, &node, fit_to, pixmap) {
+        let fit_to = unwrap_option_or_return!(fit_to.to_usvg(), ErrorId::InvalidFitValue);
+
+        match resvg::render_node(tree, &node, fit_to, pixmap) {
             Some(()) => ErrorId::Ok,
             None => ErrorId::RenderError,
         }
     } else {
-        log::warn!("A node with '{}' ID wasn't found.", id);
         ErrorId::NodeNotFound
     }
 }

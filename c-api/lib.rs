@@ -7,9 +7,10 @@
 use std::ffi::CStr;
 use std::mem::drop;
 use std::os::raw::c_char;
+use std::ptr;
 use std::slice;
 use std::str;
-use std::sync::{RwLock, TryLockError, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
 use usvg::NodeExt;
 
@@ -44,7 +45,7 @@ pub enum ErrorId {
     InvalidFitValue,
     InvalidEnumValue,
     RenderFailed,
-    BBoxFailed,
+    BBoxCalcFailed,
     EmptyNodeId,
     NodeNotFound,
     ZeroPixmapSize,
@@ -56,23 +57,43 @@ pub enum ErrorId {
 }
 
 macro_rules! some_or_return {
-    ($e:expr, $r:expr $(,)?) => {
-        match $e {
-            Some(v) => v,
-            None => return $r,
+    ($opt:expr, $ret_val:expr $(,)?) => {
+        match $opt {
+            Some(val) => val,
+            None => return $ret_val,
         }
     };
 }
 
 macro_rules! ok_or_return {
-    ($e:expr, $r:expr $(,)?) => {
-        match $e {
-            Ok(v) => v,
-            Err(e) => return $r(e),
+    ($res:expr, $map_ret_val:expr $(,)?) => {
+        match $res {
+            Ok(val) => val,
+            Err(err) => return $map_ret_val(err),
         }
     };
-    ($e:expr) => {
-        ok_or_return!($e, Into::<ErrorId>::into)
+    ($res:expr) => {
+        ok_or_return!($res, Into::<ErrorId>::into)
+    };
+}
+
+fn store_to_ptr<T>(dst: *mut T, src: T) -> bool {
+    if dst.is_null() {
+        false
+    } else {
+        unsafe { ptr::write(dst, src); }
+        true
+    }
+}
+
+macro_rules! store_to_ptr_or_return {
+    ($dst:expr, $src:expr, $ret:expr $(,)?) => {
+        if !store_to_ptr($dst, $src) {
+            return $ret;
+        }
+    };
+    ($dst:expr, $src:expr $(,)?) => {
+        store_to_ptr_or_return!($dst, $src, ErrorId::PointerIsNull);
     };
 }
 
@@ -92,7 +113,10 @@ impl Into<ErrorId> for CastError {
     }
 }
 
-fn cast_ptr<'a, T, W: AsRef<RwLock<T>> + 'a>(ptr: *const W) -> Result<RwLockReadGuard<'a, T>, CastError> {
+fn cast_ptr<'a, T, W>(ptr: *const W) -> Result<RwLockReadGuard<'a, T>, CastError>
+where
+    W: AsRef<RwLock<T>> + 'a,
+{
     let wrapper = match unsafe { ptr.as_ref() } {
         Some(v) => v,
         None => return Err(CastError::PointerIsNull),
@@ -105,7 +129,10 @@ fn cast_ptr<'a, T, W: AsRef<RwLock<T>> + 'a>(ptr: *const W) -> Result<RwLockRead
     Ok(lock)
 }
 
-fn cast_mut_ptr<'a, T, W: AsMut<RwLock<T>> + 'a>(ptr: *mut W) -> Result<RwLockWriteGuard<'a, T>, CastError> {
+fn cast_mut_ptr<'a, T, W>(ptr: *mut W) -> Result<RwLockWriteGuard<'a, T>, CastError>
+where
+    W: AsMut<RwLock<T>> + 'a,
+{
     let wrapper = match unsafe { ptr.as_mut() } {
         Some(v) => v,
         None => return Err(CastError::PointerIsNull),
@@ -226,7 +253,9 @@ impl AsMut<RwLock<usvg::Options>> for resvg_options {
 #[apply(c_api!)]
 #[return_on_panic(std::ptr::null_mut())]
 pub fn resvg_options_create() -> *mut resvg_options {
-    Box::into_raw(Box::new(resvg_options(RwLock::new(usvg::Options::default()))))
+    Box::into_raw(Box::new(resvg_options(RwLock::new(
+        usvg::Options::default(),
+    ))))
 }
 
 #[apply(c_api!)]
@@ -246,7 +275,7 @@ pub fn resvg_options_set_resources_dir(opt: *mut resvg_options, path: *const c_c
 pub fn resvg_options_set_dpi(opt: *mut resvg_options, dpi: f64) -> ErrorId {
     let mut opt = ok_or_return!(cast_mut_ptr(opt));
     opt.dpi = dpi;
-    ErrorId::Ok    
+    ErrorId::Ok
 }
 
 #[apply(c_api!)]
@@ -285,7 +314,10 @@ pub fn resvg_options_set_serif_family(opt: *mut resvg_options, family: *const c_
 #[apply(c_api!)]
 #[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
+pub fn resvg_options_set_sans_serif_family(
+    opt: *mut resvg_options,
+    family: *const c_char,
+) -> ErrorId {
     #[cfg(feature = "text")] {
         let mut opt = ok_or_return!(cast_mut_ptr(opt));
         let family = ok_or_return!(cstr_to_str(family));
@@ -333,7 +365,10 @@ pub fn resvg_options_set_fantasy_family(opt: *mut resvg_options, family: *const 
 #[apply(c_api!)]
 #[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub fn resvg_options_set_monospace_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
+pub fn resvg_options_set_monospace_family(
+    opt: *mut resvg_options,
+    family: *const c_char,
+) -> ErrorId {
     #[cfg(feature = "text")] {
         let mut opt = ok_or_return!(cast_mut_ptr(opt));
         let family = ok_or_return!(cstr_to_str(family));
@@ -431,19 +466,13 @@ pub fn resvg_options_load_system_fonts(opt: *mut resvg_options) -> ErrorId {
 #[apply(c_api!)]
 #[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub fn resvg_options_load_font_file(
-    opt: *mut resvg_options,
-    file_path: *const c_char,
-) -> ErrorId {
+pub fn resvg_options_load_font_file(opt: *mut resvg_options, file_path: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let file_path = ok_or_return!(cstr_to_str(file_path));
         let mut opt = ok_or_return!(cast_mut_ptr(opt));
         match opt.fontdb.load_font_file(file_path) {
             Ok(()) => ErrorId::Ok,
-            Err(e) => {
-                log::warn!("Failed to load font file '{}': {}", file_path, e);
-                ErrorId::FileOpenFailed
-            }
+            Err(e) => ErrorId::FileOpenFailed,
         }
     }
 
@@ -514,18 +543,12 @@ pub fn resvg_parse_tree_from_file(
 
     let file_data = match std::fs::read(file_path) {
         Ok(tree) => tree,
-        Err(e) => {
-            log::warn!("Failed read file '{}': {}", file_path, e);
-            return ErrorId::FileOpenFailed;
-        }
+        Err(_) => return ErrorId::FileOpenFailed,
     };
 
     let tree = match usvg::Tree::from_data(&file_data, &opt.to_ref()) {
         Ok(tree) => tree,
-        Err(e) => {
-            log::warn!("Failed to parse SVG data: {}", e);
-            return convert_error(e);
-        },
+        Err(e) => return convert_error(e),
     };
 
     let tree_box = Box::new(resvg_render_tree(RwLock::new(tree)));
@@ -551,10 +574,7 @@ pub fn resvg_parse_tree_from_data(
 
     let tree = match usvg::Tree::from_data(data, &opt.to_ref()) {
         Ok(tree) => tree,
-        Err(e) => {
-            log::warn!("Failed to parse SVG data: {}", e);
-            return convert_error(e);
-        }
+        Err(e) => return convert_error(e),
     };
 
     let tree_box = Box::new(resvg_render_tree(RwLock::new(tree)));
@@ -580,14 +600,8 @@ pub fn resvg_is_image_empty(tree: *const resvg_render_tree, is_empty: *mut bool)
 
     // The root/svg node should have at least two children.
     // The first child is `defs` and it always present.
-    let e = tree.root().children().count() <= 1;
+    store_to_ptr_or_return!(is_empty, tree.root().children().count() <= 1);
 
-    if is_empty.is_null() {
-        return ErrorId::PointerIsNull;
-    }
-    unsafe {
-        *is_empty = e;
-    }
     ErrorId::Ok
 }
 
@@ -598,15 +612,14 @@ pub fn resvg_get_image_size(tree: *const resvg_render_tree, size: *mut resvg_siz
 
     let s = tree.svg_node().size;
 
-    if size.is_null() {
-        return ErrorId::PointerIsNull;
-    }
-    unsafe {
-        *size = resvg_size {
+    store_to_ptr_or_return!(
+        size,
+        resvg_size {
             width: s.width(),
             height: s.height(),
-        };
-    }
+        },
+    );
+
     ErrorId::Ok
 }
 
@@ -617,46 +630,37 @@ pub fn resvg_get_image_viewbox(tree: *const resvg_render_tree, rect: *mut resvg_
 
     let r = tree.svg_node().view_box.rect;
 
-    if rect.is_null() {
-        return ErrorId::PointerIsNull;
-    }
-    unsafe {
-        *rect = resvg_rect {
+    store_to_ptr_or_return!(
+        rect,
+        resvg_rect {
             x: r.x(),
             y: r.y(),
             width: r.width(),
             height: r.height(),
-        }
-    }
+        },
+    );
+
     ErrorId::Ok
 }
 
-
 #[apply(c_api!)]
 #[return_on_panic(ErrorId::PanicCaught)]
-pub fn resvg_get_image_bbox(
-    tree: *const resvg_render_tree,
-    bbox: *mut resvg_rect,
-) -> ErrorId {
+pub fn resvg_get_image_bbox(tree: *const resvg_render_tree, bbox: *mut resvg_rect) -> ErrorId {
     let tree = ok_or_return!(cast_ptr(tree));
 
-    if bbox.is_null() {
-        return ErrorId::PointerIsNull;
-    }
-    if let Some(r) = tree.root().calculate_bbox().and_then(|r| r.to_rect()) {
-        unsafe {
-            *bbox = resvg_rect {
-                x: r.x(),
-                y: r.y(),
-                width: r.width(),
-                height: r.height(),
-            }
-        }
+    let r = some_or_return!(tree.root().calculate_bbox(), ErrorId::BBoxCalcFailed);
 
-        ErrorId::Ok
-    } else {
-        ErrorId::BBoxFailed
-    }
+    store_to_ptr_or_return!(
+        bbox,
+        resvg_rect {
+            x: r.x(),
+            y: r.y(),
+            width: r.width(),
+            height: r.height(),
+        },
+    );
+
+    ErrorId::Ok
 }
 
 #[apply(c_api!)]
@@ -673,25 +677,21 @@ pub fn resvg_get_node_bbox(
 
     let tree = ok_or_return!(cast_ptr(tree));
 
-    match tree.node_by_id(id) {
-        Some(node) => {
-            if let Some(r) = node.calculate_bbox() {
-                unsafe {
-                    *bbox = resvg_path_bbox {
-                        x: r.x(),
-                        y: r.y(),
-                        width: r.width(),
-                        height: r.height(),
-                    }
-                }
+    let node = some_or_return!(tree.node_by_id(id), ErrorId::NodeNotFound);
 
-                ErrorId::Ok
-            } else {
-                ErrorId::BBoxFailed
-            }
+    let r = some_or_return!(node.calculate_bbox(), ErrorId::BBoxCalcFailed);
+
+    store_to_ptr_or_return!(
+        bbox,
+        resvg_path_bbox {
+            x: r.x(),
+            y: r.y(),
+            width: r.width(),
+            height: r.height(),
         }
-        None => ErrorId::NodeNotFound,
-    }
+    );
+
+    ErrorId::Ok
 }
 
 #[apply(c_api!)]
@@ -708,14 +708,11 @@ pub fn resvg_node_exists(
 
     let tree = ok_or_return!(cast_ptr(tree));
 
-    let e = tree.node_by_id(id).is_some();
+    store_to_ptr_or_return!(
+        exists,
+        tree.node_by_id(id).is_some(),
+    );
 
-    if exists.is_null() {
-        return ErrorId::PointerIsNull;
-    }
-    unsafe {
-        *exists = e;
-    }
     ErrorId::Ok
 }
 
@@ -733,28 +730,23 @@ pub fn resvg_get_node_transform(
 
     let tree = ok_or_return!(cast_ptr(tree));
 
-    if ts.is_null() {
-        return ErrorId::PointerIsNull;
-    }
+    let node = some_or_return!(tree.node_by_id(id), ErrorId::NodeNotFound);
 
-    if let Some(node) = tree.node_by_id(id) {
-        let abs_ts = node.abs_transform();
+    let abs_ts = node.abs_transform();
 
-        unsafe {
-            *ts = resvg_transform {
-                a: abs_ts.a,
-                b: abs_ts.b,
-                c: abs_ts.c,
-                d: abs_ts.d,
-                e: abs_ts.e,
-                f: abs_ts.f,
-            }
-        }
+    store_to_ptr_or_return!(
+        ts,
+        resvg_transform {
+            a: abs_ts.a,
+            b: abs_ts.b,
+            c: abs_ts.c,
+            d: abs_ts.d,
+            e: abs_ts.e,
+            f: abs_ts.f,
+        },
+    );
 
-        ErrorId::Ok
-    } else {
-        ErrorId::NodeNotFound
-    }
+    ErrorId::Ok
 }
 
 enum CStrToStrError {
@@ -775,11 +767,9 @@ fn cstr_to_str(text: *const c_char) -> Result<&'static str, CStrToStrError> {
     if text.is_null() {
         return Err(CStrToStrError::PointerIsNull);
     }
-    let text = unsafe {
-        CStr::from_ptr(text)
-    };
+    let text = unsafe { CStr::from_ptr(text) };
 
-    text.to_str().map_err(|e| CStrToStrError::NotAnUtf8Str(e))
+    text.to_str().map_err(CStrToStrError::NotAnUtf8Str)
 }
 
 fn convert_error(e: usvg::Error) -> ErrorId {
@@ -791,7 +781,6 @@ fn convert_error(e: usvg::Error) -> ErrorId {
         usvg::Error::ParsingFailed(_) => ErrorId::ParsingFailed,
     }
 }
-
 
 #[apply(c_api!)]
 #[return_on_panic(ErrorId::PanicCaught)]
@@ -866,7 +855,6 @@ pub fn resvg_render_node(
         ErrorId::NodeNotFound
     }
 }
-
 
 /// A simple stderr logger.
 static LOGGER: SimpleLogger = SimpleLogger;

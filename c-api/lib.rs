@@ -27,7 +27,7 @@ pub enum Error {
     InvalidFitValue,
     InvalidEnumValue,
     RenderFailed,
-    BBoxCalcFailed,
+    BboxCalcFailed,
     EmptyNodeId,
     NodeNotFound,
     PixmapCreationFailed,
@@ -533,7 +533,7 @@ pub fn resvg_get_image_viewbox(tree: *const resvg_render_tree) -> Result<resvg_r
 #[apply(make_c_api_call!)]
 pub fn resvg_get_image_bbox(tree: *const resvg_render_tree) -> Result<resvg_rect, Error> {
     let tree = &ptr_to_ref(tree)?.0;
-    let r = tree.root().calculate_bbox().ok_or(Error::BBoxCalcFailed)?;
+    let r = tree.root().calculate_bbox().ok_or(Error::BboxCalcFailed)?;
     Ok(resvg_rect {
         x: r.x(),
         y: r.y(),
@@ -550,7 +550,7 @@ pub fn resvg_get_node_bbox(
     let id = cstr_to_node_id(id)?;
     let tree = &ptr_to_ref(tree)?.0;
     let node = tree.node_by_id(id).ok_or(Error::NodeNotFound)?;
-    let r = node.calculate_bbox().ok_or(Error::BBoxCalcFailed)?;
+    let r = node.calculate_bbox().ok_or(Error::BboxCalcFailed)?;
     Ok(resvg_path_bbox {
         x: r.x(),
         y: r.y(),

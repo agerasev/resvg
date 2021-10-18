@@ -9,8 +9,28 @@ use std::mem::drop;
 use std::os::raw::c_char;
 use std::slice;
 use std::str;
+use std::panic::AssertUnwindSafe;
 
 use usvg::NodeExt;
+
+use no_panic::no_panic;
+use macro_rules_attribute::apply;
+
+macro_rules! c_api {
+    (
+        #[return_on_panic($ret_on_panic:expr)]
+        $(#[$field_meta:meta])*
+        $fn_vis:vis fn $fn_name:ident($( $arg_name:ident : $arg_type:ty ),* $(,)?) $( -> $ret_type:ty )?
+        $fn_body:block
+    ) => (
+        $(#[$field_meta])*
+        #[no_mangle]
+        #[no_panic]
+        $fn_vis extern "C" fn $fn_name($( $arg_name : $arg_type ),*) $( -> $ret_type )? {
+            std::panic::catch_unwind(move || $fn_body).unwrap_or($ret_on_panic)
+        }
+    )
+}
 
 #[repr(C)]
 pub enum ErrorId {
@@ -32,6 +52,7 @@ pub enum ErrorId {
     PixmapCreationError,
     NotImplemented,
     PanicCaught,
+    Poisoned,
 }
 
 macro_rules! some_or_return {
@@ -160,8 +181,9 @@ impl resvg_fit_to {
 }
 
 
-#[no_mangle]
-pub extern "C" fn resvg_init_log() {
+#[apply(c_api!)]
+#[return_on_panic(())]
+pub fn resvg_init_log() {
     if let Ok(()) = log::set_logger(&LOGGER) {
         log::set_max_level(log::LevelFilter::Warn);
     }
@@ -169,15 +191,17 @@ pub extern "C" fn resvg_init_log() {
 
 
 #[repr(C)]
-pub struct resvg_options(usvg::Options);
+pub struct resvg_options(AssertUnwindSafe<usvg::Options>);
 
-#[no_mangle]
-pub extern "C" fn resvg_options_create() -> *mut resvg_options {
-    Box::into_raw(Box::new(resvg_options(usvg::Options::default())))
+#[apply(c_api!)]
+#[return_on_panic(std::ptr::null_mut())]
+pub fn resvg_options_create() -> *mut resvg_options {
+    Box::into_raw(Box::new(resvg_options(AssertUnwindSafe(usvg::Options::default()))))
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_options_set_resources_dir(opt: *mut resvg_options, path: *const c_char) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_options_set_resources_dir(opt: *mut resvg_options, path: *const c_char) -> ErrorId {
     let opt = cast_mut_ptr_or_return!(opt);
     if path.is_null() {
         opt.resources_dir = None;
@@ -187,31 +211,35 @@ pub extern "C" fn resvg_options_set_resources_dir(opt: *mut resvg_options, path:
     ErrorId::Ok
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_options_set_dpi(opt: *mut resvg_options, dpi: f64) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_options_set_dpi(opt: *mut resvg_options, dpi: f64) -> ErrorId {
     let opt = cast_mut_ptr_or_return!(opt);
     opt.dpi = dpi;
     ErrorId::Ok    
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_options_set_font_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_options_set_font_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     let opt = cast_mut_ptr_or_return!(opt);
     let family = ok_or_return!(cstr_to_str(family));
     opt.font_family = family.to_string();
     ErrorId::Ok
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_options_set_font_size(opt: *mut resvg_options, font_size: f64) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_options_set_font_size(opt: *mut resvg_options, font_size: f64) -> ErrorId {
     let opt = cast_mut_ptr_or_return!(opt);
     opt.font_size = font_size;
     ErrorId::Ok
 }
 
-#[no_mangle]
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_set_serif_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
+pub fn resvg_options_set_serif_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
         let family = ok_or_return!(cstr_to_str(family));
@@ -224,9 +252,10 @@ pub extern "C" fn resvg_options_set_serif_family(opt: *mut resvg_options, family
     }
 }
 
-#[no_mangle]
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
+pub fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
         let family = ok_or_return!(cstr_to_str(family));
@@ -239,9 +268,10 @@ pub extern "C" fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, f
     }
 }
 
-#[no_mangle]
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_set_cursive_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
+pub fn resvg_options_set_cursive_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
         let family = ok_or_return!(cstr_to_str(family));
@@ -254,9 +284,10 @@ pub extern "C" fn resvg_options_set_cursive_family(opt: *mut resvg_options, fami
     }
 }
 
-#[no_mangle]
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_set_fantasy_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
+pub fn resvg_options_set_fantasy_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
         let family = ok_or_return!(cstr_to_str(family));
@@ -269,9 +300,10 @@ pub extern "C" fn resvg_options_set_fantasy_family(opt: *mut resvg_options, fami
     }
 }
 
-#[no_mangle]
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_set_monospace_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
+pub fn resvg_options_set_monospace_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
         let family = ok_or_return!(cstr_to_str(family));
@@ -284,8 +316,9 @@ pub extern "C" fn resvg_options_set_monospace_family(opt: *mut resvg_options, fa
     }
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_options_set_languages(opt: *mut resvg_options, languages: *const c_char) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_options_set_languages(opt: *mut resvg_options, languages: *const c_char) -> ErrorId {
     let opt = cast_mut_ptr_or_return!(opt);
 
     if languages.is_null() {
@@ -304,8 +337,9 @@ pub extern "C" fn resvg_options_set_languages(opt: *mut resvg_options, languages
     ErrorId::Ok
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options, mode: i32) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options, mode: i32) -> ErrorId {
     let opt = cast_mut_ptr_or_return!(opt);
     opt.shape_rendering = match mode {
         0 => usvg::ShapeRendering::OptimizeSpeed,
@@ -316,8 +350,9 @@ pub extern "C" fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options
     ErrorId::Ok
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options, mode: i32) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options, mode: i32) -> ErrorId {
     let opt = cast_mut_ptr_or_return!(opt);
     opt.text_rendering = match mode {
         0 => usvg::TextRendering::OptimizeSpeed,
@@ -328,8 +363,9 @@ pub extern "C" fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options,
     ErrorId::Ok
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options, mode: i32) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options, mode: i32) -> ErrorId {
     let opt = cast_mut_ptr_or_return!(opt);
     opt.image_rendering = match mode {
         0 => usvg::ImageRendering::OptimizeQuality,
@@ -339,16 +375,18 @@ pub extern "C" fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options
     ErrorId::Ok
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_options_set_keep_named_groups(opt: *mut resvg_options, keep: bool) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_options_set_keep_named_groups(opt: *mut resvg_options, keep: bool) -> ErrorId {
     let opt = cast_mut_ptr_or_return!(opt);
     opt.keep_named_groups = keep;
     ErrorId::Ok
 }
 
-#[no_mangle]
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_load_system_fonts(opt: *mut resvg_options) -> ErrorId {
+pub fn resvg_options_load_system_fonts(opt: *mut resvg_options) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
         opt.fontdb.load_system_fonts();
@@ -360,9 +398,10 @@ pub extern "C" fn resvg_options_load_system_fonts(opt: *mut resvg_options) -> Er
     }
 }
 
-#[no_mangle]
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_load_font_file(
+pub fn resvg_options_load_font_file(
     opt: *mut resvg_options,
     file_path: *const c_char,
 ) -> ErrorId {
@@ -383,9 +422,10 @@ pub extern "C" fn resvg_options_load_font_file(
     }
 }
 
-#[no_mangle]
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
 #[allow(unused_variables)]
-pub extern "C" fn resvg_options_load_font_data(
+pub fn resvg_options_load_font_data(
     opt: *mut resvg_options,
     data: *const c_char,
     len: usize,
@@ -405,8 +445,9 @@ pub extern "C" fn resvg_options_load_font_data(
     }
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_options_destroy(opt: *mut resvg_options) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_options_destroy(opt: *mut resvg_options) -> ErrorId {
     if opt.is_null() {
         return ErrorId::PointerIsNull;
     }
@@ -416,10 +457,11 @@ pub extern "C" fn resvg_options_destroy(opt: *mut resvg_options) -> ErrorId {
 
 
 #[repr(C)]
-pub struct resvg_render_tree(pub usvg::Tree);
+pub struct resvg_render_tree(pub AssertUnwindSafe<usvg::Tree>);
 
-#[no_mangle]
-pub extern "C" fn resvg_parse_tree_from_file(
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_parse_tree_from_file(
     file_path: *const c_char,
     opt: *const resvg_options,
     raw_tree: *mut *mut resvg_render_tree,
@@ -444,14 +486,15 @@ pub extern "C" fn resvg_parse_tree_from_file(
         },
     };
 
-    let tree_box = Box::new(resvg_render_tree(tree));
+    let tree_box = Box::new(resvg_render_tree(AssertUnwindSafe(tree)));
     unsafe { *raw_tree = Box::into_raw(tree_box); }
 
     ErrorId::Ok
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_parse_tree_from_data(
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_parse_tree_from_data(
     data: *const c_char,
     len: usize,
     opt: *const resvg_options,
@@ -472,14 +515,15 @@ pub extern "C" fn resvg_parse_tree_from_data(
         }
     };
 
-    let tree_box = Box::new(resvg_render_tree(tree));
+    let tree_box = Box::new(resvg_render_tree(AssertUnwindSafe(tree)));
     unsafe { *raw_tree = Box::into_raw(tree_box); }
 
     ErrorId::Ok
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_tree_destroy(tree: *mut resvg_render_tree) -> ErrorId {
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_tree_destroy(tree: *mut resvg_render_tree) -> ErrorId {
     if tree.is_null() {
         return ErrorId::PointerIsNull;
     }
@@ -487,8 +531,9 @@ pub extern "C" fn resvg_tree_destroy(tree: *mut resvg_render_tree) -> ErrorId {
     ErrorId::Ok
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_is_image_empty(tree: *const resvg_render_tree) -> bool {
+//#[apply(c_api!)]
+//#[return_on_panic(false)]
+pub fn resvg_is_image_non_empty(tree: *const resvg_render_tree) -> bool {
     let tree = cast_ptr_or_return!(tree, false);
 
     // The root/svg node should have at least two children.
@@ -496,15 +541,15 @@ pub extern "C" fn resvg_is_image_empty(tree: *const resvg_render_tree) -> bool {
     tree.root().children().count() > 1
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_get_image_size(tree: *const resvg_render_tree) -> resvg_size {
-    let tree = cast_ptr_or_return!(
-        tree,
-        resvg_size {
-            width: 0.0,
-            height: 0.0,
-        },
-    );
+const EMPTY_SIZE: resvg_size = resvg_size {
+    width: 0.0,
+    height: 0.0,
+};
+
+//#[apply(c_api!)]
+//#[return_on_panic(EMPTY_SIZE)]
+pub fn resvg_get_image_size(tree: *const resvg_render_tree) -> resvg_size {
+    let tree = cast_ptr_or_return!(tree, EMPTY_SIZE);
 
     let size = tree.svg_node().size;
 
@@ -514,17 +559,17 @@ pub extern "C" fn resvg_get_image_size(tree: *const resvg_render_tree) -> resvg_
     }
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_get_image_viewbox(tree: *const resvg_render_tree) -> resvg_rect {
-    let tree = cast_ptr_or_return!(
-        tree,
-        resvg_rect {
-            x: 0.0,
-            y: 0.0,
-            width: 0.0,
-            height: 0.0,
-        },
-    );
+const EMPTY_RECT: resvg_rect = resvg_rect {
+    x: 0.0,
+    y: 0.0,
+    width: 0.0,
+    height: 0.0,
+};
+
+//#[apply(c_api!)]
+//#[return_on_panic(EMPTY_RECT)]
+pub fn resvg_get_image_viewbox(tree: *const resvg_render_tree) -> resvg_rect {
+    let tree = cast_ptr_or_return!(tree, EMPTY_RECT);
 
     let r = tree.svg_node().view_box.rect;
 
@@ -537,8 +582,9 @@ pub extern "C" fn resvg_get_image_viewbox(tree: *const resvg_render_tree) -> res
 }
 
 
-#[no_mangle]
-pub extern "C" fn resvg_get_image_bbox(
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_get_image_bbox(
     tree: *const resvg_render_tree,
     bbox: *mut resvg_rect,
 ) -> ErrorId {
@@ -563,8 +609,9 @@ pub extern "C" fn resvg_get_image_bbox(
     }
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_get_node_bbox(
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_get_node_bbox(
     tree: *const resvg_render_tree,
     id: *const c_char,
     bbox: *mut resvg_path_bbox,
@@ -597,8 +644,9 @@ pub extern "C" fn resvg_get_node_bbox(
     }
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_node_exists(
+//#[apply(c_api!)]
+//#[return_on_panic(false)]
+pub fn resvg_node_exists(
     tree: *const resvg_render_tree,
     id: *const c_char,
 ) -> bool {
@@ -612,8 +660,9 @@ pub extern "C" fn resvg_node_exists(
     tree.node_by_id(id).is_some()
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_get_node_transform(
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_get_node_transform(
     tree: *const resvg_render_tree,
     id: *const c_char,
     ts: *mut resvg_transform,
@@ -685,8 +734,9 @@ fn convert_error(e: usvg::Error) -> ErrorId {
 }
 
 
-#[no_mangle]
-pub extern "C" fn resvg_render(
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_render(
     tree: *const resvg_render_tree,
     fit_to: resvg_fit_to,
     width: u32,
@@ -716,8 +766,9 @@ pub extern "C" fn resvg_render(
     }
 }
 
-#[no_mangle]
-pub extern "C" fn resvg_render_node(
+#[apply(c_api!)]
+#[return_on_panic(ErrorId::PanicCaught)]
+pub fn resvg_render_node(
     tree: *const resvg_render_tree,
     id: *const c_char,
     fit_to: resvg_fit_to,

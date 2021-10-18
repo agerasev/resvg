@@ -12,7 +12,7 @@ use std::str;
 
 use usvg::NodeExt;
 
-#[repr(i32)]
+#[repr(C)]
 pub enum ErrorId {
     Ok = 0,
     NotAnUtf8Str,
@@ -22,18 +22,19 @@ pub enum ErrorId {
     InvalidSize,
     ParsingFailed,
     PointerIsNull,
-    ZeroPixmapSize,
     InvalidFitValue,
     InvalidEnumValue,
-    RenderError,
-    BBoxError,
+    RenderFailed,
+    BBoxFailed,
     EmptyNodeId,
     NodeNotFound,
+    ZeroPixmapSize,
+    PixmapCreationError,
     NotImplemented,
     PanicCaught,
 }
 
-macro_rules! unwrap_option_or_return {
+macro_rules! some_or_return {
     ($e:expr, $r:expr $(,)?) => {
         match $e {
             Some(v) => v,
@@ -42,7 +43,7 @@ macro_rules! unwrap_option_or_return {
     };
 }
 
-macro_rules! unwrap_result_or_return {
+macro_rules! ok_or_return {
     ($e:expr, $r:expr $(,)?) => {
         match $e {
             Ok(v) => v,
@@ -50,7 +51,7 @@ macro_rules! unwrap_result_or_return {
         }
     };
     ($e:expr) => {
-        unwrap_result_or_return!($e, Into::<ErrorId>::into)
+        ok_or_return!($e, Into::<ErrorId>::into)
     };
 }
 
@@ -181,7 +182,7 @@ pub extern "C" fn resvg_options_set_resources_dir(opt: *mut resvg_options, path:
     if path.is_null() {
         opt.resources_dir = None;
     } else {
-        opt.resources_dir = Some(unwrap_result_or_return!(cstr_to_str(path)).into());
+        opt.resources_dir = Some(ok_or_return!(cstr_to_str(path)).into());
     }
     ErrorId::Ok
 }
@@ -196,7 +197,7 @@ pub extern "C" fn resvg_options_set_dpi(opt: *mut resvg_options, dpi: f64) -> Er
 #[no_mangle]
 pub extern "C" fn resvg_options_set_font_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     let opt = cast_mut_ptr_or_return!(opt);
-    let family = unwrap_result_or_return!(cstr_to_str(family));
+    let family = ok_or_return!(cstr_to_str(family));
     opt.font_family = family.to_string();
     ErrorId::Ok
 }
@@ -213,7 +214,7 @@ pub extern "C" fn resvg_options_set_font_size(opt: *mut resvg_options, font_size
 pub extern "C" fn resvg_options_set_serif_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
-        let family = unwrap_result_or_return!(cstr_to_str(family));
+        let family = ok_or_return!(cstr_to_str(family));
         opt.fontdb.set_serif_family(family.to_string());
         ErrorId::Ok
     }
@@ -228,7 +229,7 @@ pub extern "C" fn resvg_options_set_serif_family(opt: *mut resvg_options, family
 pub extern "C" fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
-        let family = unwrap_result_or_return!(cstr_to_str(family));
+        let family = ok_or_return!(cstr_to_str(family));
         opt.fontdb.set_sans_serif_family(family.to_string());
         ErrorId::Ok
     }
@@ -243,7 +244,7 @@ pub extern "C" fn resvg_options_set_sans_serif_family(opt: *mut resvg_options, f
 pub extern "C" fn resvg_options_set_cursive_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
-        let family = unwrap_result_or_return!(cstr_to_str(family));
+        let family = ok_or_return!(cstr_to_str(family));
         opt.fontdb.set_cursive_family(family.to_string());
         ErrorId::Ok
     }
@@ -258,7 +259,7 @@ pub extern "C" fn resvg_options_set_cursive_family(opt: *mut resvg_options, fami
 pub extern "C" fn resvg_options_set_fantasy_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
-        let family = unwrap_result_or_return!(cstr_to_str(family));
+        let family = ok_or_return!(cstr_to_str(family));
         opt.fontdb.set_fantasy_family(family.to_string());
         ErrorId::Ok
     }
@@ -273,7 +274,7 @@ pub extern "C" fn resvg_options_set_fantasy_family(opt: *mut resvg_options, fami
 pub extern "C" fn resvg_options_set_monospace_family(opt: *mut resvg_options, family: *const c_char) -> ErrorId {
     #[cfg(feature = "text")] {
         let opt = cast_mut_ptr_or_return!(opt);
-        let family = unwrap_result_or_return!(cstr_to_str(family));
+        let family = ok_or_return!(cstr_to_str(family));
         opt.fontdb.set_monospace_family(family.to_string());
         ErrorId::Ok
     }
@@ -292,7 +293,7 @@ pub extern "C" fn resvg_options_set_languages(opt: *mut resvg_options, languages
         return ErrorId::Ok;
     }
 
-    let languages_str = unwrap_result_or_return!(cstr_to_str(languages));
+    let languages_str = ok_or_return!(cstr_to_str(languages));
 
     let mut languages = Vec::new();
     for lang in languages_str.split(',') {
@@ -366,7 +367,7 @@ pub extern "C" fn resvg_options_load_font_file(
     file_path: *const c_char,
 ) -> ErrorId {
     #[cfg(feature = "text")] {
-        let file_path = unwrap_result_or_return!(cstr_to_str(file_path));
+        let file_path = ok_or_return!(cstr_to_str(file_path));
         let opt = cast_mut_ptr_or_return!(opt);
         match opt.fontdb.load_font_file(file_path) {
             Ok(()) => ErrorId::Ok,
@@ -423,7 +424,7 @@ pub extern "C" fn resvg_parse_tree_from_file(
     opt: *const resvg_options,
     raw_tree: *mut *mut resvg_render_tree,
 ) -> ErrorId {
-    let file_path = unwrap_result_or_return!(cstr_to_str(file_path));
+    let file_path = ok_or_return!(cstr_to_str(file_path));
 
     let opt = cast_ptr_or_return!(opt);
 
@@ -558,7 +559,7 @@ pub extern "C" fn resvg_get_image_bbox(
 
         ErrorId::Ok
     } else {
-        ErrorId::BBoxError
+        ErrorId::BBoxFailed
     }
 }
 
@@ -568,7 +569,7 @@ pub extern "C" fn resvg_get_node_bbox(
     id: *const c_char,
     bbox: *mut resvg_path_bbox,
 ) -> ErrorId {
-    let id = unwrap_result_or_return!(cstr_to_str(id));
+    let id = ok_or_return!(cstr_to_str(id));
     if id.is_empty() {
         return ErrorId::EmptyNodeId;
     }
@@ -589,7 +590,7 @@ pub extern "C" fn resvg_get_node_bbox(
 
                 ErrorId::Ok
             } else {
-                ErrorId::BBoxError
+                ErrorId::BBoxFailed
             }
         }
         None => ErrorId::NodeNotFound,
@@ -601,7 +602,7 @@ pub extern "C" fn resvg_node_exists(
     tree: *const resvg_render_tree,
     id: *const c_char,
 ) -> bool {
-    let id = unwrap_result_or_return!(cstr_to_str(id), |_| false);
+    let id = ok_or_return!(cstr_to_str(id), |_| false);
     if id.is_empty() {
         return false;
     }
@@ -617,7 +618,7 @@ pub extern "C" fn resvg_get_node_transform(
     id: *const c_char,
     ts: *mut resvg_transform,
 ) -> ErrorId {
-    let id = unwrap_result_or_return!(cstr_to_str(id));
+    let id = ok_or_return!(cstr_to_str(id));
     if id.is_empty() {
         return ErrorId::EmptyNodeId;
     }
@@ -702,13 +703,16 @@ pub extern "C" fn resvg_render(
     }
     let pixmap_len = width as usize * height as usize * tiny_skia::BYTES_PER_PIXEL;
     let pixmap: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(pixmap as *mut u8, pixmap_len) };
-    let pixmap = tiny_skia::PixmapMut::from_bytes(pixmap, width, height).unwrap();
+    let pixmap = some_or_return!(
+        tiny_skia::PixmapMut::from_bytes(pixmap, width, height),
+        ErrorId::PixmapCreationError,
+    );
 
-    let fit_to = unwrap_option_or_return!(fit_to.to_usvg(), ErrorId::InvalidFitValue);
+    let fit_to = some_or_return!(fit_to.to_usvg(), ErrorId::InvalidFitValue);
 
     match resvg::render(tree, fit_to, pixmap) {
         Some(()) => ErrorId::Ok,
-        None => ErrorId::RenderError,
+        None => ErrorId::RenderFailed,
     }
 }
 
@@ -723,7 +727,7 @@ pub extern "C" fn resvg_render_node(
 ) -> ErrorId {
     let tree = cast_ptr_or_return!(tree);
 
-    let id = unwrap_result_or_return!(cstr_to_str(id));
+    let id = ok_or_return!(cstr_to_str(id));
     if id.is_empty() {
         return ErrorId::EmptyNodeId;
     }
@@ -737,13 +741,16 @@ pub extern "C" fn resvg_render_node(
         }
         let pixmap_len = width as usize * height as usize * tiny_skia::BYTES_PER_PIXEL;
         let pixmap: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(pixmap as *mut u8, pixmap_len) };
-        let pixmap = tiny_skia::PixmapMut::from_bytes(pixmap, width, height).unwrap();
+        let pixmap = some_or_return!(
+            tiny_skia::PixmapMut::from_bytes(pixmap, width, height),
+            ErrorId::PixmapCreationError,
+        );
 
-        let fit_to = unwrap_option_or_return!(fit_to.to_usvg(), ErrorId::InvalidFitValue);
+        let fit_to = some_or_return!(fit_to.to_usvg(), ErrorId::InvalidFitValue);
 
         match resvg::render_node(tree, &node, fit_to, pixmap) {
             Some(()) => ErrorId::Ok,
-            None => ErrorId::RenderError,
+            None => ErrorId::RenderFailed,
         }
     } else {
         ErrorId::NodeNotFound

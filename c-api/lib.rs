@@ -10,7 +10,7 @@ use std::os::raw::c_char;
 use std::ptr;
 use std::slice;
 use std::str;
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
+use std::panic::AssertUnwindSafe;
 
 use usvg::NodeExt;
 
@@ -32,12 +32,10 @@ pub enum Error {
     NodeNotFound,
     PixmapCreationFailed,
     NotImplemented,
-    ConcurrentAccess,
     PanicCaught,
-    Poisoned,
 }
 
-macro_rules! c_api {
+macro_rules! make_c_api_call {
     (
         $(#[$field_meta:meta])*
         $fn_vis:vis fn $fn_name:ident($( $arg_name:ident : $arg_type:ty ),* $(,)?) -> Result<(), Error>
@@ -95,15 +93,6 @@ impl From<usvg::Error> for Error {
             usvg::Error::ElementsLimitReached => Error::ElementsLimitReached,
             usvg::Error::InvalidSize => Error::InvalidSize,
             usvg::Error::ParsingFailed(_) => Error::ParsingFailed,
-        }
-    }
-}
-
-impl<T> From<TryLockError<T>> for Error {
-    fn from(err: TryLockError<T>) -> Error {
-        match err {
-            TryLockError::WouldBlock => return Error::ConcurrentAccess,
-            TryLockError::Poisoned(_) => return Error::Poisoned,
         }
     }
 }
@@ -215,7 +204,7 @@ impl resvg_fit_to {
 }
 
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_init_log() -> Result<(), Error> {
     if let Ok(()) = log::set_logger(&LOGGER) {
         log::set_max_level(log::LevelFilter::Warn);
@@ -224,27 +213,18 @@ pub fn resvg_init_log() -> Result<(), Error> {
 }
 
 #[repr(C)]
-pub struct resvg_options(RwLock<usvg::Options>);
+pub struct resvg_options(AssertUnwindSafe<usvg::Options>);
 
-impl resvg_options {
-    fn acquire<'a>(&'a self) -> Result<RwLockReadGuard<'a, usvg::Options>, Error> {
-        Ok(self.0.try_read()?)
-    }
-    fn acquire_mut<'a>(&'a mut self) -> Result<RwLockWriteGuard<'a, usvg::Options>, Error> {
-        Ok(self.0.try_write()?)
-    }
-}
-
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_create() -> Result<*mut resvg_options, Error> {
-    Ok(Box::into_raw(Box::new(resvg_options(RwLock::new(
+    Ok(Box::into_raw(Box::new(resvg_options(AssertUnwindSafe(
         usvg::Options::default(),
     )))))
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_set_resources_dir(opt: *mut resvg_options, path: *const c_char) -> Result<(), Error> {
-    let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+    let opt = &mut ptr_to_mut(opt)?.0;
     if path.is_null() {
         opt.resources_dir = None;
     } else {
@@ -253,33 +233,33 @@ pub fn resvg_options_set_resources_dir(opt: *mut resvg_options, path: *const c_c
     Ok(())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_set_dpi(opt: *mut resvg_options, dpi: f64) -> Result<(), Error> {
-    let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+    let opt = &mut ptr_to_mut(opt)?.0;
     opt.dpi = dpi;
     Ok(())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_set_font_family(opt: *mut resvg_options, family: *const c_char) -> Result<(), Error> {
-    let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+    let opt = &mut ptr_to_mut(opt)?.0;
     let family = cstr_to_str(family)?;
     opt.font_family = family.to_string();
     Ok(())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_set_font_size(opt: *mut resvg_options, font_size: f64) -> Result<(), Error> {
-    let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+    let opt = &mut ptr_to_mut(opt)?.0;
     opt.font_size = font_size;
     Ok(())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 #[allow(unused_variables)]
 pub fn resvg_options_set_serif_family(opt: *mut resvg_options, family: *const c_char) -> Result<(), Error> {
     #[cfg(feature = "text")] {
-        let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+        let opt = &mut ptr_to_mut(opt)?.0;
         let family = cstr_to_str(family)?;
         opt.fontdb.set_serif_family(family.to_string());
         Ok(())
@@ -290,14 +270,14 @@ pub fn resvg_options_set_serif_family(opt: *mut resvg_options, family: *const c_
     }
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 #[allow(unused_variables)]
 pub fn resvg_options_set_sans_serif_family(
     opt: *mut resvg_options,
     family: *const c_char,
 ) -> Result<(), Error> {
     #[cfg(feature = "text")] {
-        let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+        let opt = &mut ptr_to_mut(opt)?.0;
         let family = cstr_to_str(family)?;
         opt.fontdb.set_sans_serif_family(family.to_string());
         Ok(())
@@ -308,11 +288,11 @@ pub fn resvg_options_set_sans_serif_family(
     }
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 #[allow(unused_variables)]
 pub fn resvg_options_set_cursive_family(opt: *mut resvg_options, family: *const c_char) -> Result<(), Error> {
     #[cfg(feature = "text")] {
-        let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+        let opt = &mut ptr_to_mut(opt)?.0;
         let family = cstr_to_str(family)?;
         opt.fontdb.set_cursive_family(family.to_string());
         Ok(())
@@ -323,11 +303,11 @@ pub fn resvg_options_set_cursive_family(opt: *mut resvg_options, family: *const 
     }
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 #[allow(unused_variables)]
 pub fn resvg_options_set_fantasy_family(opt: *mut resvg_options, family: *const c_char) -> Result<(), Error> {
     #[cfg(feature = "text")] {
-        let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+        let opt = &mut ptr_to_mut(opt)?.0;
         let family = cstr_to_str(family)?;
         opt.fontdb.set_fantasy_family(family.to_string());
         Ok(())
@@ -338,14 +318,14 @@ pub fn resvg_options_set_fantasy_family(opt: *mut resvg_options, family: *const 
     }
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 #[allow(unused_variables)]
 pub fn resvg_options_set_monospace_family(
     opt: *mut resvg_options,
     family: *const c_char,
 ) -> Result<(), Error> {
     #[cfg(feature = "text")] {
-        let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+        let opt = &mut ptr_to_mut(opt)?.0;
         let family = cstr_to_str(family)?;
         opt.fontdb.set_monospace_family(family.to_string());
         Ok(())
@@ -356,9 +336,9 @@ pub fn resvg_options_set_monospace_family(
     }
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_set_languages(opt: *mut resvg_options, languages: *const c_char) -> Result<(), Error> {
-    let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+    let opt = &mut ptr_to_mut(opt)?.0;
 
     if languages.is_null() {
         opt.languages = Vec::new();
@@ -376,9 +356,9 @@ pub fn resvg_options_set_languages(opt: *mut resvg_options, languages: *const c_
     Ok(())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options, mode: i32) -> Result<(), Error> {
-    let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+    let opt = &mut ptr_to_mut(opt)?.0;
     opt.shape_rendering = match mode {
         0 => usvg::ShapeRendering::OptimizeSpeed,
         1 => usvg::ShapeRendering::CrispEdges,
@@ -388,9 +368,9 @@ pub fn resvg_options_set_shape_rendering_mode(opt: *mut resvg_options, mode: i32
     Ok(())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options, mode: i32) -> Result<(), Error> {
-    let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+    let opt = &mut ptr_to_mut(opt)?.0;
     opt.text_rendering = match mode {
         0 => usvg::TextRendering::OptimizeSpeed,
         1 => usvg::TextRendering::OptimizeLegibility,
@@ -400,9 +380,9 @@ pub fn resvg_options_set_text_rendering_mode(opt: *mut resvg_options, mode: i32)
     Ok(())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options, mode: i32) -> Result<(), Error> {
-    let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+    let opt = &mut ptr_to_mut(opt)?.0;
     opt.image_rendering = match mode {
         0 => usvg::ImageRendering::OptimizeQuality,
         1 => usvg::ImageRendering::OptimizeSpeed,
@@ -411,18 +391,18 @@ pub fn resvg_options_set_image_rendering_mode(opt: *mut resvg_options, mode: i32
     Ok(())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_set_keep_named_groups(opt: *mut resvg_options, keep: bool) -> Result<(), Error> {
-    let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+    let opt = &mut ptr_to_mut(opt)?.0;
     opt.keep_named_groups = keep;
     Ok(())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 #[allow(unused_variables)]
 pub fn resvg_options_load_system_fonts(opt: *mut resvg_options) -> Result<(), Error> {
     #[cfg(feature = "text")] {
-        let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+        let opt = &mut ptr_to_mut(opt)?.0;
         opt.fontdb.load_system_fonts();
         Ok(())
     }
@@ -432,12 +412,12 @@ pub fn resvg_options_load_system_fonts(opt: *mut resvg_options) -> Result<(), Er
     }
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 #[allow(unused_variables)]
 pub fn resvg_options_load_font_file(opt: *mut resvg_options, file_path: *const c_char) -> Result<(), Error> {
     #[cfg(feature = "text")] {
         let file_path = cstr_to_str(file_path)?;
-        let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+        let opt = &mut ptr_to_mut(opt)?.0;
         opt.fontdb.load_font_file(file_path).map_err(|_| Error::FileOpenFailed)
     }
 
@@ -446,7 +426,7 @@ pub fn resvg_options_load_font_file(opt: *mut resvg_options, file_path: *const c
     }
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 #[allow(unused_variables)]
 pub fn resvg_options_load_font_data(
     opt: *mut resvg_options,
@@ -458,7 +438,7 @@ pub fn resvg_options_load_font_data(
             return Err(Error::PointerIsNull);
         }
         let data = unsafe { slice::from_raw_parts(data as *const u8, len) };
-        let mut opt = ptr_to_mut(opt)?.acquire_mut()?;
+        let opt = &mut ptr_to_mut(opt)?.0;
         opt.fontdb.load_font_data(data.to_vec());
         Ok(())
     }
@@ -468,7 +448,7 @@ pub fn resvg_options_load_font_data(
     }
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_options_destroy(opt: *mut resvg_options) -> Result<(), Error> {
     if opt.is_null() {
         return Err(Error::PointerIsNull);
@@ -479,28 +459,22 @@ pub fn resvg_options_destroy(opt: *mut resvg_options) -> Result<(), Error> {
 
 
 #[repr(C)]
-pub struct resvg_render_tree(pub RwLock<usvg::Tree>);
+pub struct resvg_render_tree(AssertUnwindSafe<usvg::Tree>);
 
-impl resvg_render_tree {
-    fn acquire<'a>(&'a self) -> Result<RwLockReadGuard<'a, usvg::Tree>, Error> {
-        Ok(self.0.try_read()?)
-    }
-}
-
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_parse_tree_from_file(
     file_path: *const c_char,
     opt: *const resvg_options,
 ) -> Result<*mut resvg_render_tree, Error> {
     let file_path = cstr_to_str(file_path)?;
-    let opt = ptr_to_ref(opt)?.acquire()?;
+    let opt = &ptr_to_ref(opt)?.0;
     let file_data = std::fs::read(file_path).map_err(|_| Error::FileOpenFailed)?;
     let tree = usvg::Tree::from_data(&file_data, &opt.to_ref())?;
-    let tree_box = Box::new(resvg_render_tree(RwLock::new(tree)));
+    let tree_box = Box::new(resvg_render_tree(AssertUnwindSafe(tree)));
     Ok(Box::into_raw(tree_box))
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_parse_tree_from_data(
     data: *const c_char,
     len: usize,
@@ -510,13 +484,13 @@ pub fn resvg_parse_tree_from_data(
         return Err(Error::PointerIsNull);
     }
     let data = unsafe { slice::from_raw_parts(data as *const u8, len) };
-    let opt = ptr_to_ref(opt)?.acquire()?;
+    let opt = &ptr_to_ref(opt)?.0;
     let tree = usvg::Tree::from_data(data, &opt.to_ref())?;
-    let tree_box = Box::new(resvg_render_tree(RwLock::new(tree)));
+    let tree_box = Box::new(resvg_render_tree(AssertUnwindSafe(tree)));
     Ok(Box::into_raw(tree_box))
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_tree_destroy(tree: *mut resvg_render_tree) -> Result<(), Error> {
     if tree.is_null() {
         return Err(Error::PointerIsNull);
@@ -525,18 +499,18 @@ pub fn resvg_tree_destroy(tree: *mut resvg_render_tree) -> Result<(), Error> {
     Ok(())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_is_image_empty(tree: *const resvg_render_tree) -> Result<bool, Error> {
-    let tree = ptr_to_ref(tree)?.acquire()?;
+    let tree = &ptr_to_ref(tree)?.0;
 
     // The root/svg node should have at least two children.
     // The first child is `defs` and it always present.
     Ok(tree.root().children().count() <= 1)
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_get_image_size(tree: *const resvg_render_tree) -> Result<resvg_size, Error> {
-    let tree = ptr_to_ref(tree)?.acquire()?;
+    let tree = &ptr_to_ref(tree)?.0;
     let s = tree.svg_node().size;
     Ok(resvg_size {
         width: s.width(),
@@ -544,9 +518,9 @@ pub fn resvg_get_image_size(tree: *const resvg_render_tree) -> Result<resvg_size
     })
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_get_image_viewbox(tree: *const resvg_render_tree) -> Result<resvg_rect, Error> {
-    let tree = ptr_to_ref(tree)?.acquire()?;
+    let tree = &ptr_to_ref(tree)?.0;
     let r = tree.svg_node().view_box.rect;
     Ok(resvg_rect {
         x: r.x(),
@@ -556,9 +530,9 @@ pub fn resvg_get_image_viewbox(tree: *const resvg_render_tree) -> Result<resvg_r
     })
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_get_image_bbox(tree: *const resvg_render_tree) -> Result<resvg_rect, Error> {
-    let tree = ptr_to_ref(tree)?.acquire()?;
+    let tree = &ptr_to_ref(tree)?.0;
     let r = tree.root().calculate_bbox().ok_or(Error::BBoxCalcFailed)?;
     Ok(resvg_rect {
         x: r.x(),
@@ -568,13 +542,13 @@ pub fn resvg_get_image_bbox(tree: *const resvg_render_tree) -> Result<resvg_rect
     })
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_get_node_bbox(
     tree: *const resvg_render_tree,
     id: *const c_char,
 ) -> Result<resvg_path_bbox, Error> {
     let id = cstr_to_node_id(id)?;
-    let tree = ptr_to_ref(tree)?.acquire()?;
+    let tree = &ptr_to_ref(tree)?.0;
     let node = tree.node_by_id(id).ok_or(Error::NodeNotFound)?;
     let r = node.calculate_bbox().ok_or(Error::BBoxCalcFailed)?;
     Ok(resvg_path_bbox {
@@ -585,23 +559,23 @@ pub fn resvg_get_node_bbox(
     })
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_node_exists(
     tree: *const resvg_render_tree,
     id: *const c_char,
 ) -> Result<bool, Error> {
     let id = cstr_to_node_id(id)?;
-    let tree = ptr_to_ref(tree)?.acquire()?;
+    let tree = &ptr_to_ref(tree)?.0;
     Ok(tree.node_by_id(id).is_some())
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_get_node_transform(
     tree: *const resvg_render_tree,
     id: *const c_char,
 ) -> Result<resvg_transform, Error> {
     let id = cstr_to_node_id(id)?;
-    let tree = ptr_to_ref(tree)?.acquire()?;
+    let tree = &ptr_to_ref(tree)?.0;
     let node = tree.node_by_id(id).ok_or(Error::NodeNotFound)?;
     let abs_ts = node.abs_transform();
     Ok(resvg_transform {
@@ -626,7 +600,7 @@ fn create_pixmap<'a>(width: u32, height: u32, data: *const c_char) -> Result<tin
     tiny_skia::PixmapMut::from_bytes(data, width, height).ok_or(Error::PixmapCreationFailed)
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_render(
     tree: *const resvg_render_tree,
     fit_to: resvg_fit_to,
@@ -634,13 +608,13 @@ pub fn resvg_render(
     height: u32,
     pixmap: *const c_char,
 ) -> Result<(), Error> {
-    let tree = ptr_to_ref(tree)?.acquire()?;
+    let tree = &ptr_to_ref(tree)?.0;
     let pixmap = create_pixmap(width, height, pixmap)?;
     let fit_to = fit_to.to_usvg()?;
     resvg::render(&tree, fit_to, pixmap).ok_or(Error::RenderFailed)
 }
 
-#[apply(c_api!)]
+#[apply(make_c_api_call!)]
 pub fn resvg_render_node(
     tree: *const resvg_render_tree,
     id: *const c_char,
@@ -649,7 +623,7 @@ pub fn resvg_render_node(
     height: u32,
     pixmap: *const c_char,
 ) -> Result<(), Error> {
-    let tree = ptr_to_ref(tree)?.acquire()?;
+    let tree = &ptr_to_ref(tree)?.0;
     let id = cstr_to_node_id(id)?;
     if let Some(node) = tree.node_by_id(id) {
         let pixmap = create_pixmap(width, height, pixmap)?;

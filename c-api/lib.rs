@@ -16,7 +16,8 @@ use usvg::NodeExt;
 
 use macro_rules_attribute::apply;
 
-pub enum Error {
+#[allow(dead_code)]
+enum Error {
     NotAnUtf8Str = 1,
     FileOpenFailed,
     MalformedGZip,
@@ -43,7 +44,6 @@ macro_rules! make_c_api_call {
     ) => (
         $(#[$field_meta])*
         #[no_mangle]
-        #[no_panic::no_panic]
         $fn_vis extern "C" fn $fn_name($( $arg_name : $arg_type, )*) -> i32 {
             std::panic::catch_unwind(move || -> Result<(), Error> { $fn_body })
                 .map(|res| match res {
@@ -60,7 +60,6 @@ macro_rules! make_c_api_call {
     ) => (
         $(#[$field_meta])*
         #[no_mangle]
-        #[no_panic::no_panic]
         $fn_vis extern "C" fn $fn_name($( $arg_name : $arg_type, )* output: *mut $ret_type) -> i32 {
             std::panic::catch_unwind(move || -> Result<$ret_type, Error> { $fn_body })
                 .map(|res| match res {

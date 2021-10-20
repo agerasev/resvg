@@ -96,14 +96,17 @@ impl From<usvg::Error> for Error {
     }
 }
 
+#[inline]
 fn ptr_to_ref<'a, T>(ptr: *const T) -> Result<&'a T, Error> {
     unsafe { ptr.as_ref() }.ok_or(Error::PointerIsNull)
 }
 
+#[inline]
 fn ptr_to_mut<'a, T>(ptr: *mut T) -> Result<&'a mut T, Error> {
     unsafe { ptr.as_mut() }.ok_or(Error::PointerIsNull)
 }
 
+#[inline]
 fn cstr_to_str(text: *const c_char) -> Result<&'static str, Error> {
     if text.is_null() {
         return Err(Error::PointerIsNull);
@@ -113,6 +116,7 @@ fn cstr_to_str(text: *const c_char) -> Result<&'static str, Error> {
     Ok(text.to_str()?)
 }
 
+#[inline]
 fn cstr_to_node_id(text: *const c_char) -> Result<&'static str, Error> {
     let text = cstr_to_str(text)?;
     if text.is_empty() {
@@ -214,10 +218,12 @@ pub fn resvg_init_log() -> Result<(), Error> {
 #[repr(C)]
 pub struct resvg_options(AssertUnwindSafe<usvg::Options>);
 
+#[inline]
 fn cast_opt<'a>(opt: *const resvg_options) -> Result<&'a usvg::Options, Error> {
     Ok(&ptr_to_ref(opt)?.0)
 }
 
+#[inline]
 fn cast_opt_mut<'a>(opt: *mut resvg_options) -> Result<&'a mut usvg::Options, Error> {
     Ok(&mut ptr_to_mut(opt)?.0)
 }
@@ -468,6 +474,7 @@ pub fn resvg_options_destroy(opt: *mut resvg_options) -> Result<(), Error> {
 #[repr(C)]
 pub struct resvg_render_tree(AssertUnwindSafe<usvg::Tree>);
 
+#[inline]
 fn cast_tree<'a>(tree: *const resvg_render_tree) -> Result<&'a usvg::Tree, Error> {
     Ok(&ptr_to_ref(tree)?.0)
 }
